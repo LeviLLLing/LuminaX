@@ -1,179 +1,114 @@
-# LuminaX-灵犀经营智能引擎
+# LuminaX Project Instructions
 
-## 项目概述
+## Product Contract
+- LuminaX is an extensible local POC for governed business analytics.
+- The product provides metric calculation, custom metric registration, reports, attribution, authentication, and data permissions.
+- Preserve the public API, SSE protocol, MySQL schema, SQL Server adapter interface, and runtime registry compatibility.
 
-单页面 Web 应用，实现门店销售数据的自然语言查询、图表联动、多级归因分析和智能周报生成。
+## Current Stack
+- Next.js 16 App Router, React 19, TypeScript 5, Tailwind CSS 4, shadcn/ui and Radix UI.
+- ECharts for charts, MySQL as the active SQL metric source, and a retained SQL Server data-source adapter.
+- DeepSeek models for governance, business explanation, attribution, and metric SQL authoring.
 
-### 核心原则
+## Architecture Boundaries
+### Routes and adapters
+- `src/app/api/chat/route.ts` delegates `POST` to `handleChatHttpRequest` in `src/modules/chat/chat-http-adapter.ts`; the adapter authenticates the request, calls `chatApplication.execute`, and preserves the SSE response from `streamChatResponse`.
+- `src/app/api/data/route.ts` authenticates, loads `salesDataRepository`, and projects it with `accessControl.filterSalesData`.
+- `src/app/api/auth/login/route.ts`, `logout/route.ts`, and `me/route.ts` are the public session endpoints. `src/app/api/admin/metrics/route.ts` and `src/app/api/admin/permissions/route.ts` validate action payloads and require `authorizeAdminRequest`.
 
-- **代码算数，本地解释**：所有数值计算由 JavaScript 完成，本地规则负责意图理解和结果输出
-- **本地可运行**：聊天接口不依赖外部 LLM 服务，安装依赖后可直接用 `pnpm dev` 启动
-- **对话驱动看板**：用户提问后，左侧图表自动切换（单店→饼图，多店→柱状图）
-- **数据不可变**：所有分析基于固定的 sales_data.json 源数据
+### Application use cases
+- `chatApplication` in `src/modules/chat/chat-composition.ts` implements `ChatApplication.execute(command: ChatCommand): Promise<ChatResult>` from `src/modules/chat/chat-application.ts`.
+- `authApplication` in `src/modules/auth/auth-composition.ts` implements `AuthApplication` from `src/modules/auth/auth-application.ts`; `authenticateRequest` is the HTTP-facing session helper in `src/modules/auth/auth-http.ts`.
+- `permissionAdminApplication` in `src/modules/admin/permissions/permission-composition.ts` and `metricAdminApplication` in `src/modules/admin/metrics/metric-composition.ts` are the administration use cases.
 
-### 版本技术栈
+### Agents
+- Runtime chat composition in `src/modules/chat/chat-composition.ts` creates Governance, Business, and Attribution Agents with separate `DeepSeekChatModel` and `InMemoryAgentMemory` instances.
+- Public factories are `createGovernanceAgent`, `createBusinessAgent`, `createAttributionAgent`, and `createMetricSqlAuthoringAgent` under `src/modules/agents/`.
+- Shared contracts are `AgentModel` and `AgentMemory` in `src/modules/agents/shared/`; DeepSeek transport is `DeepSeekChatModel`.
 
-- **Framework**: Next.js 16 (App Router)
-- **Core**: React 19
-- **Language**: TypeScript 5
-- **UI 组件**: shadcn/ui (基于 Radix UI)
-- **Styling**: Tailwind CSS 4
-- **Charts**: ECharts 5
-- **Analysis API**: 本地规则识别 + JavaScript 计算
+### Metrics and SQL
+- Fixed metric execution uses `SqlMetricQueryExecutor.execute(intent, scope)` from `src/modules/metrics/sql-metric-query-executor.ts`, implemented by `MySqlSqlMetricQueryExecutor` in `src/modules/metrics/sql/mysql-sql-metric-query-executor.ts`.
+- The allowlisted fixed SQL contracts live in `src/modules/metrics/sql/mysql-metric-queries.ts` and return structured results for business, attribution, and report intents.
+- Published custom metrics use `CustomMetricRuntime.match` and `CustomMetricRuntime.execute` in `src/modules/admin/metrics/custom-metric-runtime.ts`; `metricAdminApplication` validates and test-executes SQL before publishing.
 
-## 目录结构
+### Permissions and authentication
+- `AccessControl.authorizeScope`, `evaluate`, and `filterSalesData` in `src/modules/admin/permissions/access-control.ts` enforce active user, table, column, and store-value access on the server.
+- Password credentials are managed by `AuthApplication`, `FileCredentialRepository`, and `SessionManager`; `luminax_session` is an HTTP-only, strict same-site session cookie.
 
-```
-├── public/
-│   └── sales_data.json         # 门店销售数据（10张表，5店×14天）
-├── src/
-│   ├── app/
-│   │   ├── api/chat/route.ts   # 本地流式分析 API（规则识别 + 8 项专项分析）
-│   │   ├── globals.css         # 全局样式
-│   │   ├── layout.tsx          # 根布局
-│   │   └── page.tsx            # 主页面（仪表盘 + 对话面板）
-│   ├── components/ui/          # Shadcn UI 组件库
-│   ├── hooks/                  # 自定义 Hooks
-│   └── lib/
-│       ├── data.ts             # 数据层：加载、筛选、计算、8 项专项分析、周报生成
-│       ├── nlu.ts              # NLU 层：规则降级（实体提取、意图分类）
-│       ├── types.ts            # 类型定义
-│       └── utils.ts            # 通用工具函数
-├── DESIGN.md                   # 设计规范
-├── AGENTS.md                   # 本文件
-├── next.config.ts
-├── package.json
-└── tsconfig.json
-```
+### Reports and visualization
+- `src/modules/reports/report-engine.ts` exposes `generateWeeklyReportSummary` and `generateWeeklyReportHTML`; the stable report model is `WeeklyReportData` in `src/modules/reports/report-model.ts`.
+- `src/modules/reports/sql-report-formatter.ts` formats SQL-backed report results. Dashboard chart options are built by `buildDashboardChartOptions` in `src/modules/visualization/chart-options.ts` for the ECharts UI.
 
-## 数据结构
+### Runtime repositories
+- `.luminax/` is ignored local runtime state. `FilePermissionRepository`, `FileMetricDefinitionRepository`, `FileCredentialRepository`, and `SessionManager` use it by default for access control, metric registry, credentials, and the session secret.
+- `SalesDataSource` in `src/modules/data-source/data-source.ts` is the adapter contract. JSON, MySQL, and SQL Server implementations are selected by `createSalesDataSource`; fixed metric execution remains MySQL-backed.
 
-sales_data.json 包含 10 张表（门店ID已脱敏为 S001-S005）：
+## Non-Negotiable Data Rules
+- Fixed and published custom metric values are calculated by SQL, not by an Agent.
+- Agents select intent, store scope, date range, and presentation; they do not invent final numeric values.
+- Every data request is authorized on the server by table, column, and store value.
+- Attribution receives only data that was already scoped and authorized.
 
-| 表名 | 说明 | 记录数 |
-|------|------|--------|
-| store_master | 门店主数据 | 5 |
-| store_sales_daily | 每日销售 | 70 |
-| sales_target_daily | 每日目标 | 70 |
-| sales_by_channel | 渠道销售（Dine-in/Takeaway/Delivery） | 210 |
-| sales_by_daypart | 时段销售（Breakfast/Lunch/Afternoon Tea/Dinner） | 280 |
-| sales_by_category | 品类销售（Burger/Fried Chicken/Beverage/Combo Meal/Snack） | 350 |
-| promotion_daily | 促销数据 | 90 |
-| refund_cancel_daily | 退款数据 | 70 |
-| store_manager_feedback | 店长反馈 | 7 |
-| store_sales_attribution_dataset | 归因数据集 | 70 |
+## Agent Contract
+### Governance Agent (治理 Agent)
+- `createGovernanceAgent` in `src/modules/agents/governance/governance-agent.ts` exposes `review(request): Promise<GovernanceResult>` and either rejects a request or returns a `GovernanceHandoff` for the Business Agent.
+- It uses its own configured DeepSeek model (`DEEPSEEK_GOVERNANCE_MODEL` or `DEEPSEEK_MODEL`), its own `InMemoryAgentMemory`, and `GOVERNANCE_SYSTEM_PROMPT` from `src/modules/agents/prompts/governance-system-prompt.ts`.
+- Local prompt-injection and sensitive-input checks run before model review. Missing or invalid governance model output rejects the request.
 
-## 门店映射（脱敏后）
+### Business Agent (业务 Agent)
+- `createBusinessAgent` in `src/modules/agents/business/business-agent.ts` exposes `execute(request): Promise<BusinessAgentResult>`.
+- It uses its own configured DeepSeek model (`DEEPSEEK_BUSINESS_MODEL` or `DEEPSEEK_MODEL`), its own `InMemoryAgentMemory`, and `BUSINESS_SYSTEM_PROMPT` from `src/modules/agents/prompts/business-system-prompt.ts`.
+- It classifies the request, obtains an authorized scope through `AccessControl.authorizeScope`, executes a fixed MySQL metric or published custom metric, then explains only the structured result. It delegates attribution explanation to the Attribution Agent.
 
-| 门店ID | 门店名称 |
-|--------|----------|
-| S001 | 上海商场店 |
-| S002 | 办公园区店 |
-| S003 | 大学城店 |
-| S004 | 地铁站店 |
-| S005 | 社区中心店 |
+### Attribution Agent (归因 Agent)
+- `createAttributionAgent` in `src/modules/agents/attribution/attribution-agent.ts` exposes `analyze(request): Promise<string>`.
+- It uses its own configured DeepSeek model (`DEEPSEEK_ATTRIBUTION_MODEL` or `DEEPSEEK_MODEL`), its own `InMemoryAgentMemory`, and `ATTRIBUTION_SYSTEM_PROMPT` from `src/modules/agents/prompts/attribution-system-prompt.ts`.
+- Its `AttributionKnowledgeRetriever` port is defined in `src/modules/agents/attribution/attribution-rag.ts`; runtime composition currently supplies `NoopAttributionKnowledgeRetriever`, so RAG defaults to Noop and attribution explains only the already authorized structured data plus its local fallback.
 
-## 核心功能模块
+### Metric SQL Authoring Agent
+- `createMetricSqlAuthoringAgent` in `src/modules/agents/metric-authoring/metric-sql-authoring-agent.ts` exposes `generate(input): Promise<GeneratedMetricSql>` for the metric administration flow.
+- It uses `DEEPSEEK_METRIC_AUTHORING_MODEL` or `DEEPSEEK_MODEL` and `METRIC_SQL_AUTHORING_SYSTEM_PROMPT` to author a draft. It is not a runtime numeric executor and does not publish SQL itself.
+- `metricAdminApplication.generateSql`, `validateSql`, `testSql`, and `publish` retain validation, read-only allowlisting, scope compilation, and test execution as the publication gate.
 
-### 本地意图理解
-- 规则识别用户意图并提取实体（门店ID、门店名称、日期范围）
-- JS 精确计算数据
-- SSE 返回结构化意图和 Markdown 分析结果
+## Frontend and UI Contract
+- Use a unified workbench, role templates, and server-enforced permission projection.
+- Use the approved bright operations-center visual direction.
+- Keep operational screens dense, calm, scan-friendly, and responsive from 360px upward.
+- Use Lucide icons for familiar actions and tooltips for unfamiliar icon-only controls.
+- Do not nest cards, add decorative orbs, or use marketing-page composition in the workbench.
 
-### 8 项专项分析
-- achievement_rate: 销售达成率
-- order_trend: 订单数变化趋势
-- aov_trend: 客单价变化趋势
-- channel_mix: 渠道占比
-- daypart_analysis: 分时段表现
-- promotion_contribution: 促销贡献
-- refund_rate: 退款率
-- anomaly_detection: 异常日期检测
+## Security
+- Never commit `.env.local`, `.luminax/`, `.superpowers/`, logs, API keys, database passwords, session keys, or credential files.
+- Do not log secrets, cookies, personal values, or full SQL parameter values.
+- Custom metric SQL must remain read-only, allowlisted, scoped, validated, and test-executed before publishing.
 
-### 智能周报生成
-- 汇总全量数据，计算各门店排名
-- 标记异常门店（达成率 < 100%）
-- 支持动态日期范围
-- 输出结构化周报（HTML + 摘要文本）
+## Superpowers Workflow
+- Use brainstorming before creative product or architecture changes.
+- Write an approved design spec before implementation.
+- Use writing-plans for multi-step work.
+- Use test-driven-development for behavior changes and systematic-debugging for failures.
+- Use verification-before-completion before any completion claim.
+- Use requesting-code-review before integrating a major phase.
 
-### 多级归因分析
-- Level 0: 总体达成率检查
-- Level 1: 订单量 vs 客单价拆解
-- Level 2: 渠道/品类维度分析
-- Level 3: 时段分析
-- Level 4: 交叉验证（退款 + 店长反馈）
+## Testing and Definition of Done
+- Run `pnpm run ts-check`, `pnpm run lint:build`, `pnpm run test`, and `pnpm run build` for a release-level change.
+- Run MySQL checks separately when the local database is available.
+- Verify affected user journeys in a browser at desktop and mobile widths.
+- Keep documentation synchronized with architecture changes.
 
-### 对话驱动的图表联动
-- 纯聊天模式（默认全宽）
-- 周报模式：左侧周报 HTML，右侧对话
-- BI 看板模式：左侧 ECharts 图表，右侧对话
+## Git Workflow
+- `main` tracks `origin/main`.
+- Keep commits scoped to one independently reviewable task.
+- Inspect staged files for secrets and unrelated changes before every push.
 
-## 包管理规范
-
-**仅允许使用 pnpm**，严禁 npm 或 yarn。
-
+## Local Commands
 ```bash
-pnpm add <package>       # 安装依赖
-pnpm add -D <package>    # 安装开发依赖
-pnpm install             # 安装所有依赖
-pnpm remove <package>    # 移除依赖
-```
-
-## 开发规范
-
-### 编码规范
-- TypeScript strict 模式
-- 禁止隐式 any 和 as any
-- 函数参数、返回值、事件对象需有明确类型
-- 清理未使用的变量和导入
-
-### Hydration 问题防范
-- 严禁在 JSX 中直接使用 typeof window、Date.now()、Math.random()
-- 必须使用 'use client' + useEffect + useState 确保动态内容仅在客户端渲染
-- 严禁非法 HTML 嵌套（如 <p> 嵌套 <div>）
-
-### next.config 配置规范
-- 配置路径使用 path.resolve(__dirname, ...) 或 process.cwd() 动态拼接
-
-### UI 组件规范
-- 默认采用 shadcn/ui 组件、风格和规范
-- 品牌色通过常量注入（BRAND_YELLOW: #FFE600）
-
-## API 接口
-
-### POST /api/chat
-
-请求体：
-```json
-{
-  "question": "S001 上周的销售额",
-  "storeIds": ["S001"],
-  "startDate": "2025-05-01",
-  "endDate": "2025-05-14"
-}
-```
-
-响应：SSE 流式输出
-```
-data: {"type":"intent","intent":"achievement_rate","storeIds":["S001"],"startDate":"2025-05-01","endDate":"2025-05-14"}
-data: {"type":"content","content":"分析内容..."}
-data: {"type":"content","content":"更多内容..."}
-data: [DONE]
-```
-
-意图处理逻辑：
-- 8 项专项意图 → JS 计算数据 → 本地 Markdown 解释
-- attribution → 多级归因数据计算 → 本地归因摘要
-- report → 周报 HTML 生成 + 摘要文本
-- compare → 本地生成对比表格 + 数据摘要注入
-- irrelevant → 引导消息
-
-## 常用命令
-
-```bash
-pnpm dev          # 启动开发环境
-pnpm build        # 构建生产版本
-pnpm start        # 启动生产环境
-pnpm ts-check     # TypeScript 类型检查
-pnpm lint         # ESLint 检查
+pnpm install --frozen-lockfile
+pnpm dev
+pnpm test
+pnpm run test:mysql
+pnpm run test:sql-metrics
+pnpm run test:admin-metrics
+pnpm run validate
+pnpm run verify
 ```
