@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createWorkbenchContextRequestLifecycle } from "./workbench-context-lifecycle";
 import {
   fetchWorkbenchContext,
   WorkbenchContextClientError,
@@ -22,12 +23,16 @@ export function useWorkbenchContext(): UseWorkbenchContextResult {
 
   useEffect(() => {
     const controller = new AbortController();
+    const lifecycle = createWorkbenchContextRequestLifecycle();
     setIsLoading(true);
     setError(null);
     fetchWorkbenchContext(controller.signal)
-      .then(setContext)
+      .then((nextContext) =>
+        lifecycle.runIfActive(() => setContext(nextContext))
+      )
       .catch((reason: unknown) => {
         if ((reason as Error).name === "AbortError") return;
+        if (!lifecycle.runIfActive(() => {})) return;
         if (
           reason instanceof WorkbenchContextClientError &&
           reason.status === 401
@@ -40,8 +45,11 @@ export function useWorkbenchContext(): UseWorkbenchContextResult {
           reason instanceof Error ? reason.message : "工作台暂时不可用"
         );
       })
-      .finally(() => setIsLoading(false));
-    return () => controller.abort();
+      .finally(() => lifecycle.runIfActive(() => setIsLoading(false)));
+    return () => {
+      lifecycle.deactivate();
+      controller.abort();
+    };
   }, [requestVersion]);
 
   return {

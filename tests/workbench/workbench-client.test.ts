@@ -4,6 +4,7 @@ import {
   WorkbenchContextClientError,
   normalizeWorkbenchContext,
 } from "../../src/modules/workbench/workbench-context-client";
+import { createWorkbenchContextRequestLifecycle } from "../../src/hooks/workbench-context-lifecycle";
 
 test("client context normalizes templates without widening authorization", () => {
   assert.deepEqual(
@@ -29,4 +30,23 @@ test("client context rejects missing permission collections", () => {
     () => normalizeWorkbenchContext({ templateId: "default" }),
     WorkbenchContextClientError
   );
+});
+
+test("stale request completion cannot clear the newer request loading state", () => {
+  const staleRequest = createWorkbenchContextRequestLifecycle();
+  const currentRequest = createWorkbenchContextRequestLifecycle();
+  let isLoading = false;
+
+  staleRequest.deactivate();
+  currentRequest.runIfActive(() => {
+    isLoading = true;
+  });
+
+  assert.equal(
+    staleRequest.runIfActive(() => {
+      isLoading = false;
+    }),
+    false
+  );
+  assert.equal(isLoading, true);
 });
