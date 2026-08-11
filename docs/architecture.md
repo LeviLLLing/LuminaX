@@ -50,7 +50,7 @@ MySQL is the active fixed metric executor. The `SalesDataSource` adapter retains
 
 ## Permission Enforcement
 - HTTP routes authenticate through `authenticateRequest`; the chat adapter passes the authenticated `user.id` into `ChatApplication`.
-- `RepositoryAccessControl.authorizeScope` requires an active user and intersects the requested stores with the user policy for every required table and column. A strict request containing an unauthorized store is rejected.
+- `RepositoryAccessControl.authorizeScope` requires an active user, intersects available stores and any requested store IDs with the user policy for every required table and column, and returns the authorized subset. It rejects when no authorized scope remains; `strictStoreScope` additionally rejects requests containing unauthorized stores.
 - `accessControl.filterSalesData` projects `/api/data` server-side by table policy, allowed column, and allowed store value.
 - `/api/admin/metrics` and `/api/admin/permissions` require the authenticated `super_admin` role and a localhost request through `authorizeAdminRequest`.
 
