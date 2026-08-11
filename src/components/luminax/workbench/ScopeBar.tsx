@@ -80,7 +80,7 @@ export function ScopeBar({
             value={selectedStoreValue}
             onChange={(event) => selectPrimaryStore(event.target.value)}
             disabled={stores.length === 0}
-            className="h-9 w-full min-w-0 appearance-none rounded-md border border-[#c9cbd0] bg-white py-1 pr-8 pl-8 text-sm text-black outline-none transition-colors hover:border-[#737780] focus:border-black focus:ring-2 focus:ring-black/20 disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[#737780]"
+            className="h-9 w-full min-w-0 appearance-none rounded-md border border-[#737780] bg-white py-1 pr-8 pl-8 text-sm text-black outline-none transition-colors hover:border-black focus:border-black focus:ring-2 focus:ring-black/20 disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[#737780]"
           >
             <option value="" disabled>
               {stores.length === 0
@@ -105,7 +105,7 @@ export function ScopeBar({
           type="date"
           value={startDate}
           onChange={(event) => onStartDateChange(event.target.value)}
-          className="h-9 w-full rounded-md border border-[#c9cbd0] bg-white px-2 text-sm text-black outline-none transition-colors hover:border-[#737780] focus:border-black focus:ring-2 focus:ring-black/20"
+          className="h-9 w-full rounded-md border border-[#737780] bg-white px-2 text-sm text-black outline-none transition-colors hover:border-black focus:border-black focus:ring-2 focus:ring-black/20"
         />
       </label>
 
@@ -115,7 +115,7 @@ export function ScopeBar({
           type="date"
           value={endDate}
           onChange={(event) => onEndDateChange(event.target.value)}
-          className="h-9 w-full rounded-md border border-[#c9cbd0] bg-white px-2 text-sm text-black outline-none transition-colors hover:border-[#737780] focus:border-black focus:ring-2 focus:ring-black/20"
+          className="h-9 w-full rounded-md border border-[#737780] bg-white px-2 text-sm text-black outline-none transition-colors hover:border-black focus:border-black focus:ring-2 focus:ring-black/20"
         />
       </label>
 
@@ -124,7 +124,7 @@ export function ScopeBar({
           <button
             type="button"
             disabled={comparisonDisabled}
-            className="flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md border border-[#c9cbd0] bg-white px-3 text-sm font-medium text-black transition-colors hover:border-[#737780] hover:bg-[#f5f6f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[#737780]"
+            className="flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md border border-[#737780] bg-white px-3 text-sm font-medium text-black transition-colors hover:border-black hover:bg-[#f5f6f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[#737780]"
           >
             <StoreIcon className="size-4 shrink-0" />
             <span className="truncate">
@@ -133,7 +133,7 @@ export function ScopeBar({
             <ChevronDown className="size-4 shrink-0" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64 rounded-md border-[#c9cbd0]">
+        <DropdownMenuContent align="end" className="w-64 rounded-md border-[#737780]">
           <DropdownMenuLabel>选择对比门店</DropdownMenuLabel>
           <DropdownMenuSeparator />
           {stores.map((store) => (
@@ -154,24 +154,29 @@ export function ScopeBar({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md border border-[#c9cbd0] bg-white px-3 text-sm font-medium text-black transition-colors hover:border-[#737780] hover:bg-[#f5f6f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
+            className="flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md border border-[#737780] bg-white px-3 text-sm font-medium text-black transition-colors hover:border-black hover:bg-[#f5f6f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
           >
             <BarChart3 className="size-4 shrink-0" />
             <span className="truncate">可用指标</span>
             <ChevronDown className="size-4 shrink-0" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56 rounded-md border-[#c9cbd0]">
+        <DropdownMenuContent align="end" className="w-56 rounded-md border-[#737780]">
           <DropdownMenuLabel>可用指标</DropdownMenuLabel>
           <DropdownMenuSeparator />
           {availableMetricCodes.length > 0 ? (
             availableMetricCodes.map((metricCode) => (
-              <DropdownMenuItem key={metricCode} disabled>
+              <DropdownMenuItem
+                key={metricCode}
+                onSelect={(event) => event.preventDefault()}
+              >
                 {getMetricLabel(metricCode)}
               </DropdownMenuItem>
             ))
           ) : (
-            <DropdownMenuItem disabled>暂无可用指标</DropdownMenuItem>
+            <DropdownMenuItem onSelect={(event) => event.preventDefault()}>
+              暂无可用指标
+            </DropdownMenuItem>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
