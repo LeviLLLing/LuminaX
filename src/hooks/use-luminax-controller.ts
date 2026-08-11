@@ -6,7 +6,6 @@ import {
   DEFAULT_END_DATE,
   DEFAULT_START_DATE,
 } from "@/modules/domain/constants";
-import type { ViewMode } from "@/modules/domain/ui-types";
 import { getChartData } from "@/modules/metrics/chart-data";
 import { computeDataSummary } from "@/modules/metrics/metric-engine";
 import { generateWeeklyReportHTML } from "@/modules/reports/report-engine";
@@ -21,9 +20,8 @@ import {
 } from "@/modules/workbench/workbench-presentation";
 import type { WorkbenchContext } from "@/modules/workbench/workbench-types";
 
-export function useLuminaXController(context?: WorkbenchContext | null) {
+export function useLuminaXController(context: WorkbenchContext | null) {
   const { salesData, loading, error, reload } = useSalesData(context !== null);
-  const [viewMode, setViewMode] = useState<ViewMode>("chat");
   const [insightView, setInsightView] = useState<InsightView>("overview");
   const [reportHTML, setReportHTML] = useState("");
   const [selectedStore, setSelectedStore] = useState("all");
@@ -33,7 +31,6 @@ export function useLuminaXController(context?: WorkbenchContext | null) {
 
   const authorizedStores = useMemo(() => {
     if (!salesData || context === null) return [];
-    if (context === undefined) return salesData.store_master;
     return salesData.store_master.filter((store) =>
       context.availableStoreIds.includes(store.store_id)
     );
@@ -97,10 +94,7 @@ export function useLuminaXController(context?: WorkbenchContext | null) {
   const applyIntentMetadata = useCallback(
     (metadata: IntentViewMetadata) => {
       if (context === null) return;
-      const authorized =
-        context === undefined
-          ? metadata
-          : authorizeIntentMetadata(metadata, context);
+      const authorized = authorizeIntentMetadata(metadata, context);
       if (!authorized) return;
       const nextView = resolveInsightView(authorized.intent);
 
@@ -114,7 +108,6 @@ export function useLuminaXController(context?: WorkbenchContext | null) {
             )
           );
           setInsightView("report");
-          setViewMode("report");
         }
         return;
       }
@@ -129,7 +122,6 @@ export function useLuminaXController(context?: WorkbenchContext | null) {
       setStartDate(authorized.startDate);
       setEndDate(authorized.endDate);
       setInsightView(nextView);
-      setViewMode(nextView === "analysis" ? "dashboard" : "chat");
     },
     [context, salesData]
   );
@@ -153,9 +145,7 @@ export function useLuminaXController(context?: WorkbenchContext | null) {
     setInsightView,
     setSelectedStore,
     setStartDate,
-    setViewMode,
     startDate,
-    viewMode,
     applyIntentMetadata,
   };
 }
