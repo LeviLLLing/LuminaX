@@ -16,8 +16,7 @@ import {
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
     role: "ai",
-    content:
-      "您好！我是销售归因分析专家，可以帮您分析门店销售数据。\n\n• **销售达成率**：如「计算 S001 的销售达成率」\n• **订单趋势**：如「分析 S002 的订单数变化趋势」\n• **客单价趋势**：如「分析 S003 的 AOV 变化趋势」\n• **渠道占比**：如「看一下 S001 的渠道占比」\n• **分时段表现**：如「分析 S002 的分时段表现」\n• **促销贡献**：如「计算 S001 的促销贡献」\n• **退款率**：如「计算 S003 的退款率」\n• **异常检测**：如「检测 S001 的异常日期」\n• **周报/对比/归因**：如「生成周报」「S001 对比 S002」「为什么没达标」\n\n请问您想了解什么？",
+    content: "您好，我是灵犀助手。请问您想了解什么？",
   },
 ];
 
@@ -35,8 +34,8 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
 
   useAutoScroll(chatAreaRef, messages);
 
-  const sendMessage = useCallback(async () => {
-    const question = inputValue.trim();
+  const sendMessage = useCallback(async (questionOverride?: string) => {
+    const question = (questionOverride ?? inputValue).trim();
     if (!question || isStreaming) return;
 
     setInputValue("");
