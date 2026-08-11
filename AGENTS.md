@@ -14,12 +14,14 @@
 ### Routes and adapters
 - `src/app/api/chat/route.ts` delegates `POST` to `handleChatHttpRequest` in `src/modules/chat/chat-http-adapter.ts`; the adapter authenticates the request, calls `chatApplication.execute`, and preserves the SSE response from `streamChatResponse`.
 - `src/app/api/data/route.ts` authenticates, loads `salesDataRepository`, and projects it with `accessControl.filterSalesData`.
+- `src/app/api/workbench/context/route.ts` exposes the authenticated, non-cacheable workbench context without returning raw table, column, SQL, or credential details.
 - `src/app/api/auth/login/route.ts`, `logout/route.ts`, and `me/route.ts` are the public session endpoints. `src/app/api/admin/metrics/route.ts` and `src/app/api/admin/permissions/route.ts` validate action payloads and require `authorizeAdminRequest`.
 
 ### Application use cases
 - `chatApplication` in `src/modules/chat/chat-composition.ts` implements `ChatApplication.execute(command: ChatCommand): Promise<ChatResult>` from `src/modules/chat/chat-application.ts`.
 - `authApplication` in `src/modules/auth/auth-composition.ts` implements `AuthApplication` from `src/modules/auth/auth-application.ts`; `authenticateRequest` is the HTTP-facing session helper in `src/modules/auth/auth-http.ts`.
 - `permissionAdminApplication` in `src/modules/admin/permissions/permission-composition.ts` and `metricAdminApplication` in `src/modules/admin/metrics/metric-composition.ts` are the administration use cases.
+- `workbenchContextApplication` in `src/modules/workbench/workbench-composition.ts` resolves role templates and projects existing metric and data permissions into the client-safe `WorkbenchContext` contract.
 
 ### Agents
 - Runtime chat composition in `src/modules/chat/chat-composition.ts` creates Governance, Business, and Attribution Agents with separate `DeepSeekChatModel` and `InMemoryAgentMemory` instances.

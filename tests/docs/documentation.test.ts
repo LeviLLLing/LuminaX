@@ -28,7 +28,7 @@ test("runbook and design guide contain approved contracts", async () => {
     "只有已通过 Governance 的下游 Business 和 Attribution 解释路径在各自模型不可用时使用本地确定性回退。",
     "管理员 API 当前同时要求有效登录会话、`super_admin` 角色，并要求请求主机为 `localhost`、`127.0.0.1` 或 `::1`。",
     "`LUMINAX_DATA_SOURCE=mysql` 是当前活跃的本地数据设置，`json` 仅用于演示回退。",
-    "`pnpm run validate` 执行 TypeScript、ESLint 和完整的 27 项模块接口测试。",
+    "`pnpm run validate` 执行 TypeScript、ESLint 和完整的 30 项模块接口测试。",
   ]);
   assert.doesNotMatch(readme, /LUMINAX_ADMIN_TOKEN/);
   assert.doesNotMatch(readme, /DeepSeek 配置是可选的解释层/);

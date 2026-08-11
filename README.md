@@ -107,7 +107,7 @@ pnpm start
 
 运行完整的静态检查与模块接口测试：
 
-`pnpm run validate` 执行 TypeScript、ESLint 和完整的 27 项模块接口测试。
+`pnpm run validate` 执行 TypeScript、ESLint 和完整的 30 项模块接口测试。
 
 ```bash
 pnpm run validate
@@ -138,6 +138,10 @@ pnpm run test:admin-metrics
 - `pnpm run test:mysql` 验证所需销售数据表有数据且门店 ID 已规范化。
 - `pnpm run test:sql-metrics` 验证 MySQL 固定指标 SQL、确定性结果和既有计算结果。
 - `pnpm run test:admin-metrics` 验证管理员自定义指标 SQL 的受控执行。
+
+## Workbench Context API
+
+`GET /api/workbench/context` returns the authenticated user's role template, available stores, available metrics and intents, and admin navigation capability. The response is permission-derived and does not expose table policies, column policies, SQL, credentials, or other internal authorization details.
 
 ## Repository Structure
 
