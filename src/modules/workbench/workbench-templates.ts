@@ -15,7 +15,7 @@ const REGIONAL_MANAGER_TEMPLATE = Object.freeze({
     "promotion_contribution",
     "refund_rate",
     "custom_metric",
-  ]),
+  ] as const),
 }) satisfies WorkbenchTemplate;
 
 const DEFAULT_TEMPLATE = Object.freeze({
@@ -33,7 +33,7 @@ const DEFAULT_TEMPLATE = Object.freeze({
     "attribution",
     "report",
     "custom_metric",
-  ]),
+  ] as const),
 }) satisfies WorkbenchTemplate;
 
 export function resolveWorkbenchTemplate(role: string): WorkbenchTemplate {

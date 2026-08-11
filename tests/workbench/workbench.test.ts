@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { NextRequest } from "next/server";
+import { createGetWorkbenchContextHandler } from "../../src/app/api/workbench/context/route";
 import { SYSTEM_METRIC_DEFINITIONS } from "../../src/modules/admin/metrics/system-metric-catalog";
+import { DataAccessDeniedError } from "../../src/modules/admin/permissions/access-control";
 import type { PermissionUser } from "../../src/modules/admin/permissions/permission-types";
 import type { AuthenticatedUser } from "../../src/modules/auth/auth-types";
 import { createWorkbenchContextApplication } from "../../src/modules/workbench/workbench-context-application";
@@ -85,6 +88,59 @@ test("workbench context projects metric and store permissions without leaking po
     resolveWorkbenchTemplate("super_admin").intentOrder
   );
   assert.equal(adminContext.canAccessAdmin, true);
+});
+
+test("workbench context API enforces authentication and permission boundaries", async () => {
+  const request = new NextRequest("http://localhost/api/workbench/context");
+  const user: AuthenticatedUser = {
+    id: "manager-one",
+    username: "manager.one",
+    displayName: "Manager One",
+    role: "manager",
+  };
+  const context = {
+    templateId: "regional_manager" as const,
+    availableStoreIds: ["S001"],
+    availableMetricCodes: ["achievement_rate"],
+    availableIntents: ["achievement_rate" as const],
+    canAccessAdmin: false,
+  };
+
+  const unauthenticated = await createGetWorkbenchContextHandler({
+    async authenticate() {
+      return null;
+    },
+    async getContext() {
+      throw new Error("must not run");
+    },
+  })(request);
+  assert.equal(unauthenticated.status, 401);
+  assert.equal(unauthenticated.headers.get("Cache-Control"), "no-store");
+
+  const allowed = await createGetWorkbenchContextHandler({
+    async authenticate() {
+      return user;
+    },
+    async getContext(receivedUser) {
+      assert.deepEqual(receivedUser, user);
+      return context;
+    },
+  })(request);
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await allowed.json(), context);
+
+  const denied = await createGetWorkbenchContextHandler({
+    async authenticate() {
+      return user;
+    },
+    async getContext() {
+      throw new DataAccessDeniedError("denied");
+    },
+  })(request);
+  assert.equal(denied.status, 403);
+  assert.equal(denied.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await denied.json(), { error: "denied" });
 });
 
 function createManagerPermissionUser(): PermissionUser {
