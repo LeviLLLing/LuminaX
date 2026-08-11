@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSalesData } from "@/hooks/use-sales-data";
 import {
   DEFAULT_END_DATE,
@@ -11,27 +11,62 @@ import { getChartData } from "@/modules/metrics/chart-data";
 import { computeDataSummary } from "@/modules/metrics/metric-engine";
 import { generateWeeklyReportHTML } from "@/modules/reports/report-engine";
 import {
-  resolveIntentView,
   type IntentViewMetadata,
 } from "@/modules/chat/view-router";
 import { buildDashboardChartOptions } from "@/modules/visualization/chart-options";
+import { authorizeIntentMetadata } from "@/modules/workbench/workbench-intent-policy";
+import {
+  resolveInsightView,
+  type InsightView,
+} from "@/modules/workbench/workbench-presentation";
+import type { WorkbenchContext } from "@/modules/workbench/workbench-types";
 
-export function useLuminaXController() {
-  const { salesData, loading } = useSalesData();
+export function useLuminaXController(context?: WorkbenchContext | null) {
+  const { salesData, loading, error, reload } = useSalesData(context !== null);
   const [viewMode, setViewMode] = useState<ViewMode>("chat");
+  const [insightView, setInsightView] = useState<InsightView>("overview");
   const [reportHTML, setReportHTML] = useState("");
   const [selectedStore, setSelectedStore] = useState("all");
   const [startDate, setStartDate] = useState(DEFAULT_START_DATE);
   const [endDate, setEndDate] = useState(DEFAULT_END_DATE);
   const [compareStores, setCompareStores] = useState<string[]>([]);
 
+  const authorizedStores = useMemo(() => {
+    if (!salesData || context === null) return [];
+    if (context === undefined) return salesData.store_master;
+    return salesData.store_master.filter((store) =>
+      context.availableStoreIds.includes(store.store_id)
+    );
+  }, [context, salesData]);
+
   const activeStoreIds = useMemo(() => {
-    if (compareStores.length > 0) return compareStores;
-    if (selectedStore === "all" && salesData) {
-      return salesData.store_master.map((store) => store.store_id);
+    const allowedIds = authorizedStores.map((store) => store.store_id);
+    if (compareStores.length > 0) {
+      return compareStores.filter((storeId) => allowedIds.includes(storeId));
     }
-    return [selectedStore];
-  }, [compareStores, selectedStore, salesData]);
+    return selectedStore === "all" && allowedIds.length > 0
+      ? allowedIds
+      : allowedIds.includes(selectedStore)
+        ? [selectedStore]
+        : [];
+  }, [authorizedStores, compareStores, selectedStore]);
+
+  useEffect(() => {
+    const allowedIds = new Set(
+      authorizedStores.map((store) => store.store_id)
+    );
+    setCompareStores((storeIds) => {
+      const nextStoreIds = storeIds.filter((storeId) =>
+        allowedIds.has(storeId)
+      );
+      return nextStoreIds.length === storeIds.length
+        ? storeIds
+        : nextStoreIds;
+    });
+    setSelectedStore((storeId) =>
+      storeId === "all" || allowedIds.has(storeId) ? storeId : "all"
+    );
+  }, [authorizedStores]);
 
   const dataSummary = useMemo(
     () =>
@@ -61,53 +96,61 @@ export function useLuminaXController() {
 
   const applyIntentMetadata = useCallback(
     (metadata: IntentViewMetadata) => {
-      const nextViewMode = resolveIntentView(metadata.intent);
+      if (context === null) return;
+      const authorized =
+        context === undefined
+          ? metadata
+          : authorizeIntentMetadata(metadata, context);
+      if (!authorized) return;
+      const nextView = resolveInsightView(authorized.intent);
 
-      if (nextViewMode === "report") {
+      if (nextView === "report") {
         if (salesData) {
           setReportHTML(
             generateWeeklyReportHTML(
               salesData,
-              metadata.startDate,
-              metadata.endDate
+              authorized.startDate,
+              authorized.endDate
             )
           );
+          setInsightView("report");
           setViewMode("report");
         }
         return;
       }
 
-      if (nextViewMode === "dashboard") {
-        if (metadata.storeIds.length >= 2) {
-          setCompareStores(metadata.storeIds);
-          setSelectedStore("all");
-        } else if (metadata.storeIds.length === 1) {
-          setCompareStores([]);
-          setSelectedStore(metadata.storeIds[0]);
-        }
-        setStartDate(metadata.startDate);
-        setEndDate(metadata.endDate);
-        setViewMode("dashboard");
-        return;
+      if (authorized.storeIds.length >= 2) {
+        setCompareStores(authorized.storeIds);
+        setSelectedStore("all");
+      } else if (authorized.storeIds.length === 1) {
+        setCompareStores([]);
+        setSelectedStore(authorized.storeIds[0]);
       }
-
-      setViewMode("chat");
+      setStartDate(authorized.startDate);
+      setEndDate(authorized.endDate);
+      setInsightView(nextView);
+      setViewMode(nextView === "analysis" ? "dashboard" : "chat");
     },
-    [salesData]
+    [context, salesData]
   );
 
   return {
     activeStoreIds,
+    authorizedStores,
     chartOptions,
     compareStores,
     dataSummary,
     endDate,
+    error,
+    insightView,
     loading,
     reportHTML,
+    reload,
     salesData,
     selectedStore,
     setCompareStores,
     setEndDate,
+    setInsightView,
     setSelectedStore,
     setStartDate,
     setViewMode,
