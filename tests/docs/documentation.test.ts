@@ -15,6 +15,8 @@ test("project instructions describe the current architecture", async () => {
   ]) {
     assert.match(agents, new RegExp(required));
   }
+  assert.doesNotMatch(agents, /所有数值计算由 JavaScript/);
+  assert.doesNotMatch(agents, /聊天接口不依赖外部 LLM/);
 });
 
 test("runbook and design guide contain approved contracts", async () => {
