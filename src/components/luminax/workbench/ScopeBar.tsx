@@ -39,16 +39,19 @@ export function ScopeBar({
   onEndDateChange,
 }: ScopeBarProps) {
   const authorizedStoreIds = new Set(stores.map((store) => store.store_id));
-  const selectedStoreValue = authorizedStoreIds.has(selectedStore)
-    ? selectedStore
-    : "";
+  const selectedStoreValue =
+    stores.length === 0
+      ? ""
+      : selectedStore === "all" || authorizedStoreIds.has(selectedStore)
+        ? selectedStore
+        : "all";
   const selectedComparisonIds = compareStores.filter((storeId) =>
     authorizedStoreIds.has(storeId)
   );
   const comparisonDisabled = stores.length < 2;
 
   function selectPrimaryStore(value: string) {
-    if (!authorizedStoreIds.has(value)) return;
+    if (value !== "all" && !authorizedStoreIds.has(value)) return;
     onSelectedStoreChange(value);
     onCompareStoresChange([]);
   }
@@ -82,13 +85,13 @@ export function ScopeBar({
             disabled={stores.length === 0}
             className="h-9 w-full min-w-0 appearance-none rounded-md border border-[#737780] bg-white py-1 pr-8 pl-8 text-sm text-black outline-none transition-colors hover:border-black focus:border-black focus:ring-2 focus:ring-black/20 disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[#737780]"
           >
-            <option value="" disabled>
-              {stores.length === 0
-                ? "暂无可用门店"
-                : selectedStore === "all"
-                  ? "全部授权门店"
-                  : "选择门店"}
-            </option>
+            {stores.length === 0 ? (
+              <option value="" disabled>
+                暂无可用门店
+              </option>
+            ) : (
+              <option value="all">全部授权门店</option>
+            )}
             {stores.map((store) => (
               <option key={store.store_id} value={store.store_id}>
                 {store.store_name}

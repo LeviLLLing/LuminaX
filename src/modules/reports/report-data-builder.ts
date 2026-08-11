@@ -20,11 +20,20 @@ interface DailyAggregate {
 export function buildWeeklyReportData(
   sd: SalesData,
   startDate: string,
-  endDate: string
+  endDate: string,
+  storeIds?: string[]
 ): WeeklyReportData {
   const allStoreIds = sd.store_master.map((store) => store.store_id);
+  const availableStoreIds = new Set(allStoreIds);
+  const scopedStoreIds = Array.from(
+    new Set(
+      (storeIds ?? allStoreIds).filter((storeId) =>
+        availableStoreIds.has(storeId)
+      )
+    )
+  );
   const snapshot = createAnalysisSnapshot(sd, {
-    storeIds: allStoreIds,
+    storeIds: scopedStoreIds,
     startDate,
     endDate,
   });
@@ -53,7 +62,7 @@ export function buildWeeklyReportData(
     startDate,
     endDate,
     generatedTime: createGeneratedTime(),
-    storeCount: allStoreIds.length,
+    storeCount: scopedStoreIds.length,
     summary,
     totalSales,
     totalTarget,

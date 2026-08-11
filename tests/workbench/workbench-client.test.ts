@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ScopeBar } from "../../src/components/luminax/workbench/ScopeBar";
 import {
   WorkbenchContextClientError,
   normalizeWorkbenchContext,
@@ -147,6 +150,35 @@ test("suggested questions preserve intent order and stop after three", () => {
 
 test("unknown metric labels are returned unchanged", () => {
   assert.equal(getMetricLabel("custom_metric_42"), "custom_metric_42");
+});
+
+test("scope bar keeps the aggregate authorized-store scope selectable", () => {
+  const html = renderToStaticMarkup(
+    createElement(ScopeBar, {
+      stores: [
+        {
+          store_id: "S001",
+          store_name: "Store One",
+          region: "East",
+          city: "Shanghai",
+          store_type: "Mall",
+          opening_date: "2025-01-01",
+          area_type: "Commercial",
+        },
+      ],
+      availableMetricCodes: [],
+      selectedStore: "all",
+      compareStores: [],
+      startDate: "2025-05-01",
+      endDate: "2025-05-14",
+      onSelectedStoreChange: () => undefined,
+      onCompareStoresChange: () => undefined,
+      onStartDateChange: () => undefined,
+      onEndDateChange: () => undefined,
+    })
+  );
+
+  assert.match(html, /<option value="all" selected="">/);
 });
 
 function createClientContext(): WorkbenchContext {

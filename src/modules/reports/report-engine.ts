@@ -6,19 +6,23 @@ import { renderWeeklyReportHtml } from "@/modules/reports/weekly-report-template
 export function generateWeeklyReportSummary(
   startDate: string,
   endDate: string,
-  salesData: SalesData
+  salesData: SalesData,
+  storeIds?: string[]
 ): string {
   return renderWeeklyReportMarkdown(
-    buildWeeklyReportData(salesData, startDate, endDate)
+    buildWeeklyReportData(salesData, startDate, endDate, storeIds)
   );
 }
 
 export function generateWeeklyReportHTML(
   sd: SalesData,
   startDate = "2025-05-01",
-  endDate = "2025-05-14"
+  endDate = "2025-05-14",
+  storeIds?: string[]
 ): string {
-  return renderWeeklyReportHtml(buildWeeklyReportData(sd, startDate, endDate));
+  return renderWeeklyReportHtml(
+    buildWeeklyReportData(sd, startDate, endDate, storeIds)
+  );
 }
 
 export type {

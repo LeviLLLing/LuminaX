@@ -20,10 +20,16 @@ import {
 } from "@/modules/workbench/workbench-presentation";
 import type { WorkbenchContext } from "@/modules/workbench/workbench-types";
 
+interface GeneratedReport {
+  html: string;
+  scopeKey: string;
+}
+
 export function useLuminaXController(context: WorkbenchContext | null) {
   const { salesData, loading, error, reload } = useSalesData(context !== null);
   const [insightView, setInsightView] = useState<InsightView>("overview");
-  const [reportHTML, setReportHTML] = useState("");
+  const [generatedReport, setGeneratedReport] =
+    useState<GeneratedReport | null>(null);
   const [selectedStore, setSelectedStore] = useState("all");
   const [startDate, setStartDate] = useState(DEFAULT_START_DATE);
   const [endDate, setEndDate] = useState(DEFAULT_END_DATE);
@@ -91,6 +97,16 @@ export function useLuminaXController(context: WorkbenchContext | null) {
     [chartData, compareStores, selectedStore]
   );
 
+  const currentReportScopeKey = useMemo(
+    () =>
+      `${[...activeStoreIds].sort().join(",")}|${startDate}|${endDate}`,
+    [activeStoreIds, endDate, startDate]
+  );
+  const reportHTML =
+    generatedReport?.scopeKey === currentReportScopeKey
+      ? generatedReport.html
+      : "";
+
   const applyIntentMetadata = useCallback(
     (metadata: IntentViewMetadata) => {
       if (context === null) return;
@@ -99,14 +115,37 @@ export function useLuminaXController(context: WorkbenchContext | null) {
       const nextView = resolveInsightView(authorized.intent);
 
       if (nextView === "report") {
-        if (salesData) {
-          setReportHTML(
-            generateWeeklyReportHTML(
+        const reportStoreIds =
+          authorized.storeIds.length > 0
+            ? authorized.storeIds
+            : activeStoreIds;
+        if (salesData && reportStoreIds.length > 0) {
+          const coversAllAuthorizedStores =
+            reportStoreIds.length === authorizedStores.length &&
+            authorizedStores.every((store) =>
+              reportStoreIds.includes(store.store_id)
+            );
+          if (coversAllAuthorizedStores) {
+            setCompareStores([]);
+            setSelectedStore("all");
+          } else if (reportStoreIds.length >= 2) {
+            setCompareStores(reportStoreIds);
+            setSelectedStore("all");
+          } else {
+            setCompareStores([]);
+            setSelectedStore(reportStoreIds[0]);
+          }
+          setStartDate(authorized.startDate);
+          setEndDate(authorized.endDate);
+          setGeneratedReport({
+            html: generateWeeklyReportHTML(
               salesData,
               authorized.startDate,
-              authorized.endDate
-            )
-          );
+              authorized.endDate,
+              reportStoreIds
+            ),
+            scopeKey: `${[...reportStoreIds].sort().join(",")}|${authorized.startDate}|${authorized.endDate}`,
+          });
           setInsightView("report");
         }
         return;
@@ -123,7 +162,7 @@ export function useLuminaXController(context: WorkbenchContext | null) {
       setEndDate(authorized.endDate);
       setInsightView(nextView);
     },
-    [context, salesData]
+    [activeStoreIds, authorizedStores, context, salesData]
   );
 
   return {
