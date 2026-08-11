@@ -1,0 +1,127 @@
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+import { useAutoScroll } from "@/hooks/use-auto-scroll";
+import type { ChatMessage } from "@/modules/domain/ui-types";
+import {
+  ChatStreamError,
+  streamChatMessage,
+} from "@/modules/chat/chat-stream-client";
+import {
+  getIntentModeLabel,
+  shouldAppendModeActivation,
+  type IntentViewMetadata,
+} from "@/modules/chat/view-router";
+
+const INITIAL_MESSAGES: ChatMessage[] = [
+  {
+    role: "ai",
+    content:
+      "您好！我是销售归因分析专家，可以帮您分析门店销售数据。\n\n• **销售达成率**：如「计算 S001 的销售达成率」\n• **订单趋势**：如「分析 S002 的订单数变化趋势」\n• **客单价趋势**：如「分析 S003 的 AOV 变化趋势」\n• **渠道占比**：如「看一下 S001 的渠道占比」\n• **分时段表现**：如「分析 S002 的分时段表现」\n• **促销贡献**：如「计算 S001 的促销贡献」\n• **退款率**：如「计算 S003 的退款率」\n• **异常检测**：如「检测 S001 的异常日期」\n• **周报/对比/归因**：如「生成周报」「S001 对比 S002」「为什么没达标」\n\n请问您想了解什么？",
+  },
+];
+
+interface UseChatStreamInput {
+  onIntentMetadata: (metadata: IntentViewMetadata) => void;
+}
+
+export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
+  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
+  const [inputValue, setInputValue] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [sessionId] = useState(createChatSessionId);
+  const chatAreaRef = useRef<HTMLDivElement>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
+
+  useAutoScroll(chatAreaRef, messages);
+
+  const sendMessage = useCallback(async () => {
+    const question = inputValue.trim();
+    if (!question || isStreaming) return;
+
+    setInputValue("");
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: question },
+      { role: "ai", content: "", isLoading: true },
+    ]);
+    setIsStreaming(true);
+
+    try {
+      const abortController = new AbortController();
+      streamAbortRef.current = abortController;
+
+      setMessages((prev) =>
+        replaceLastMessage(prev, { role: "ai", content: "", isLoading: false })
+      );
+      const receivedIntent = await streamChatMessage(
+        { question, sessionId },
+        {
+          onIntent: onIntentMetadata,
+          onContent: (content) => {
+            setMessages((prev) =>
+              replaceLastMessage(prev, {
+                role: "ai",
+                content,
+                isLoading: false,
+              })
+            );
+          },
+        },
+        abortController.signal
+      );
+
+      if (receivedIntent && shouldAppendModeActivation(receivedIntent)) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `${getIntentModeLabel(receivedIntent)}模式已激活`,
+          },
+        ]);
+      }
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") {
+        const message =
+          error instanceof ChatStreamError && error.status < 500
+            ? error.message
+            : "AI 服务暂时不可用，请稍后重试。";
+        setMessages((prev) =>
+          replaceLastMessage(prev, {
+            role: "ai",
+            content: `*${message}*`,
+            isLoading: false,
+          })
+        );
+      }
+    } finally {
+      setIsStreaming(false);
+      streamAbortRef.current = null;
+    }
+  }, [inputValue, isStreaming, onIntentMetadata, sessionId]);
+
+  return {
+    chatAreaRef,
+    inputValue,
+    isStreaming,
+    messages,
+    sendMessage,
+    setInputValue,
+  };
+}
+
+function replaceLastMessage(
+  messages: ChatMessage[],
+  message: ChatMessage
+): ChatMessage[] {
+  const updated = [...messages];
+  updated[updated.length - 1] = message;
+  return updated;
+}
+
+function createChatSessionId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `luminax-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
