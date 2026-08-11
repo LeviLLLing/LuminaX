@@ -117,6 +117,7 @@ lerna-debug.log*
 pids
 .luminax/
 .superpowers/
+.worktrees/
 *.pid
 *.seed
 *.pid.lock
