@@ -4,4 +4,5 @@ import "./auth/auth.test";
 import "./analysis/analysis.test";
 import "./agents/agents.test";
 import "./chat/chat.test";
+import "./contracts/public-contracts.test";
 import "./reports/reports.test";
