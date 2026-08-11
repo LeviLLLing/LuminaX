@@ -7,7 +7,12 @@ const jsonDataSource = new JsonSalesDataSource();
 
 test("report renderers consume the stable weekly report model", async () => {
   const salesData = await jsonDataSource.loadSalesData();
-  const html = generateWeeklyReportHTML(salesData, "2025-05-05", "2025-05-07");
+  const html = generateWeeklyReportHTML(
+    salesData,
+    "2025-05-05",
+    "2025-05-07"
+  );
+
   assert.match(html, /^<!DOCTYPE html>/);
   assert.match(html, /salesTrend/);
   assert.match(html, /echarts/);
