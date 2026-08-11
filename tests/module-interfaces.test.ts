@@ -7,3 +7,4 @@ import "./chat/chat.test";
 import "./contracts/public-contracts.test";
 import "./docs/documentation.test";
 import "./reports/reports.test";
+import "./workbench/workbench.test";
