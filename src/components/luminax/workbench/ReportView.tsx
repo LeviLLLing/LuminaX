@@ -6,7 +6,7 @@ interface ReportViewProps {
 
 export function ReportView({ reportHTML }: ReportViewProps) {
   return (
-    <div className="min-h-[640px] min-w-0 flex-1 bg-white">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-white">
       <iframe
         srcDoc={reportHTML}
         className="h-full min-h-[640px] w-full border-0"

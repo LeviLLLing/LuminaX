@@ -54,9 +54,9 @@ export function AnalysisPanel({
 function AnalysisSkeleton() {
   return (
     <div aria-label="正在生成分析" className="space-y-2" role="status">
-      <div className="h-3 w-full rounded-sm bg-[#e9eaec]" />
-      <div className="h-3 w-11/12 rounded-sm bg-[#e9eaec]" />
-      <div className="h-3 w-4/5 rounded-sm bg-[#e9eaec]" />
+      <div className="h-3 w-full rounded-[2px] bg-[#e9eaec]" />
+      <div className="h-3 w-11/12 rounded-[2px] bg-[#e9eaec]" />
+      <div className="h-3 w-4/5 rounded-[2px] bg-[#e9eaec]" />
     </div>
   );
 }

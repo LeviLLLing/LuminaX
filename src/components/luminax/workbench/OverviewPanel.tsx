@@ -89,7 +89,7 @@ export function OverviewPanel({
 
 function KpiCard({ label, value }: { label: string; value: string }) {
   return (
-    <article className="min-w-0 rounded-lg border border-[#dedfe2] bg-white p-4">
+    <article className="min-w-0 rounded-[8px] border border-[#dedfe2] bg-white p-4">
       <p className="truncate text-xs font-medium text-[#666a73]">{label}</p>
       <p className="mt-2 break-words text-2xl font-semibold text-[#17181a]">{value}</p>
     </article>
@@ -108,7 +108,7 @@ function ChartCard({
   return (
     <section
       className={cn(
-        "min-w-0 rounded-lg border border-[#dedfe2] bg-white p-4",
+        "min-w-0 rounded-[8px] border border-[#dedfe2] bg-white p-4",
         wide && "xl:col-span-2"
       )}
     >

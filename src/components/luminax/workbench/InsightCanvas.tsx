@@ -42,6 +42,7 @@ export function InsightCanvas({
   onViewChange,
 }: InsightCanvasProps) {
   const { title } = getWorkbenchCopy(templateId);
+  const hasReport = reportHTML.trim().length > 0;
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#f5f6f7]">
@@ -53,7 +54,7 @@ export function InsightCanvas({
         >
           {VIEW_TABS.map((tab) => {
             const isReport = tab.view === "report";
-            const disabled = isReport && !reportHTML;
+            const disabled = isReport && !hasReport;
             const active = view === tab.view;
 
             return (
@@ -65,7 +66,7 @@ export function InsightCanvas({
                 disabled={disabled}
                 onClick={() => onViewChange(tab.view)}
                 className={cn(
-                  "min-w-0 rounded-md px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-45",
+                  "min-w-0 rounded-[8px] px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-45",
                   active
                     ? "bg-[#17181a] text-white"
                     : "bg-[#f5f6f7] text-[#4b4e55] hover:bg-[#e9eaec]"
@@ -94,7 +95,22 @@ export function InsightCanvas({
           isAnalyzing={isAnalyzing}
         />
       )}
-      {view === "report" && <ReportView reportHTML={reportHTML} />}
+      {view === "report" &&
+        (hasReport ? (
+          <ReportView reportHTML={reportHTML} />
+        ) : (
+          <ReportEmptyState />
+        ))}
     </section>
+  );
+}
+
+function ReportEmptyState() {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-4 sm:p-5">
+      <p className="max-w-sm text-center text-sm text-[#666a73]">
+        当前暂无可查看的经营周报
+      </p>
+    </div>
   );
 }
