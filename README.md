@@ -1,388 +1,153 @@
-# LuminaX 本地运行项目
+# LuminaX Local POC
 
-这是 LuminaX-灵犀经营智能引擎的本地运行版本，基于 [Next.js 16](https://nextjs.org) + [shadcn/ui](https://ui.shadcn.com)。
+LuminaX 是用于门店经营分析、归因洞察和受控指标运营的本地 POC。此文档面向本地运行与验收的操作人员；使用 `pnpm`，不使用 npm 或 yarn。
 
-本版本已从 Coze CLI 运行方式转换为普通本地 Next.js 项目。当前使用 `public/sales_data.json` 作为本地演示数据源，聊天分析接口使用本地规则识别和本地计算结果，并可调用 DeepSeek 生成中文经营分析解释。
+## Capabilities
 
-## 快速开始
+- 在统一工作台中查看门店经营数据、趋势、渠道、品类、时段和退款分析。
+- 使用聊天式分析获得可追溯的经营解释；配置 DeepSeek 时可补充中文解释，未配置时仍可使用本地分析结果。
+- 由系统管理员维护指标登记、用户、角色、数据范围与权限策略。
+- 以 MySQL 作为当前活跃的本地数据设置；`json` 仅作为演示数据回退来源。
 
-### 环境要求
+## Architecture at a Glance
 
-- Node.js 20+
-- pnpm 9+
+- Next.js 应用在本地端口 `5000` 运行。
+- `LUMINAX_DATA_SOURCE=mysql` 时，数据访问层读取 MySQL 销售数据，固定指标和管理员指标检查也面向该数据源。
+- `LUMINAX_DATA_SOURCE=json` 时，应用使用仓库内的演示数据，适合未准备 MySQL 的界面演示与排障回退。
+- DeepSeek 配置是可选的解释层；业务数据、权限判定和本地指标计算不依赖它才能启动。
+- 凭据、权限登记、指标登记和会话密钥等运行时状态写入被 Git 忽略的 `.luminax/` 目录。
 
-### 安装依赖
+## Prerequisites
+
+- Node.js 20 或更高版本。
+- pnpm 9 或更高版本。
+- MySQL 本地实例及已加载的 LuminaX 数据集，用于正常的本地运行与数据库检查。
+- 可选的 DeepSeek 服务凭据，用于生成补充分析解释。
+
+## Install
+
+在仓库根目录执行：
 
 ```bash
 pnpm install
 ```
 
-### 配置 DeepSeek
+## Environment Configuration
 
-复制 `.env.example` 为 `.env.local`，然后填写 DeepSeek API Key：
+从 `.env.example` 创建仅供本机使用的 `.env.local`，并按下列名称配置。不要提交 `.env.local`，也不要将密钥、数据库密码或管理员令牌写入 README、日志或问题单。
 
-```bash
-DEEPSEEK_API_KEY=你的Key
-DEEPSEEK_MODEL=deepseek-v4-flash
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_TIMEOUT_MS=20000
-DEEPSEEK_METRIC_AUTHORING_TIMEOUT_MS=60000
-```
+将 `LUMINAX_DATA_SOURCE` 设为 `mysql` 以启用当前活跃的本地数据设置。只有在需要演示回退或隔离 MySQL 问题时，才将其设为 `json`。
 
-如果没有配置 `DEEPSEEK_API_KEY`，系统会自动使用本地规则分析结果，不影响本地启动。
+### DeepSeek
 
-### 启动开发服务器
+以下变量均来自 `.env.example`：
+
+- `DEEPSEEK_API_KEY`：服务密钥；可留空以仅使用本地分析。
+- `DEEPSEEK_MODEL`：通用解释模型。
+- `DEEPSEEK_GOVERNANCE_MODEL`：治理场景模型。
+- `DEEPSEEK_BUSINESS_MODEL`：经营分析模型。
+- `DEEPSEEK_ATTRIBUTION_MODEL`：归因分析模型。
+- `DEEPSEEK_METRIC_AUTHORING_MODEL`：指标编写模型。
+- `DEEPSEEK_METRIC_AUTHORING_TIMEOUT_MS`：指标编写请求超时。
+- `DEEPSEEK_BASE_URL`：服务端点。
+- `DEEPSEEK_TIMEOUT_MS`：通用请求超时。
+
+### MySQL
+
+MySQL 是本地运行、MySQL 数据检查与 SQL 指标检查的活跃配置。设置 `LUMINAX_DATA_SOURCE=mysql`，并配置以下变量：
+
+- `MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE`：数据库连接位置与数据库名。
+- `MYSQL_USERNAME`、`MYSQL_PASSWORD`：数据库身份凭据。
+- `MYSQL_SSL`、`MYSQL_SSL_CA`、`MYSQL_SSL_REJECT_UNAUTHORIZED`：TLS 行为。
+- `MYSQL_CONNECTION_LIMIT`、`MYSQL_CONNECT_TIMEOUT_MS`、`MYSQL_QUERY_TIMEOUT_MS`、`MYSQL_CACHE_TTL_MS`：连接、查询与缓存控制。
+
+### SQL Server Interface
+
+`sqlserver` 是数据源工厂保留的适配器接口，不是当前活跃的本地设置。它没有随本 POC 提供与 MySQL 等价的配置、数据集、检查命令或结果保证；不要将其表述为具有 MySQL 的功能或指标校验一致性。需要演示回退时使用 `json`，需要正常本地运行时使用 `mysql`。
+
+### Runtime State
+
+- `LUMINAX_DATA_SOURCE`：选择 `mysql` 作为活跃本地设置，或选择 `json` 作为演示回退来源。
+- `LUMINAX_ADMIN_TOKEN`：可选的管理员 API 令牌；为空时，管理员 API 仅接受 localhost 请求。
+- `LUMINAX_METRIC_REGISTRY_PATH`：可选的自定义指标登记路径。
+- 默认情况下，凭据登记、权限登记、指标登记和会话密钥位于被 Git 忽略的 `.luminax/` 下。不要提交、共享或手工发布这些文件。
+
+## First Login
+
+使用部署负责人以受控方式提供的初始管理员凭据登录 `/login`；本运行手册不记录或分发默认密码。首次成功登录会将凭据以哈希形式写入 `.luminax/`。随后立即在管理员界面确认系统管理员、创建所需用户、分配角色和数据范围，并为每个新增用户设置符合要求的独立密码。
+
+## Run Locally
+
+完成 MySQL 和 `.env.local` 配置后，运行：
 
 ```bash
 pnpm dev
 ```
 
-启动后，在浏览器中打开 [http://localhost:5000](http://localhost:5000) 查看应用。
-
-开发服务器支持热更新，修改代码后页面会自动刷新。
-
-### 构建生产版本
-
-```bash
-pnpm build
-```
-
-### 启动生产服务器
+打开 [http://localhost:5000](http://localhost:5000)。如需按生产模式启动已构建的应用，先完成构建，再运行：
 
 ```bash
 pnpm start
 ```
 
-## 项目结构
+## Validate and Build
 
+运行完整的静态检查与模块接口测试：
+
+```bash
+pnpm run validate
 ```
+
+单独运行模块接口测试：
+
+```bash
+pnpm test
+```
+
+构建生产产物：
+
+```bash
+pnpm build
+```
+
+## Database Checks
+
+这些检查读取本机 `.env.local` 中的 MySQL 配置；运行前确认其指向正确的本地实例。它们适用于 MySQL，不表示 SQL Server 适配器具有相同验证覆盖。
+
+```bash
+pnpm run test:mysql
+pnpm run test:sql-metrics
+pnpm run test:admin-metrics
+```
+
+- `pnpm run test:mysql` 验证所需销售数据表有数据且门店 ID 已规范化。
+- `pnpm run test:sql-metrics` 验证 MySQL 固定指标 SQL、确定性结果和既有计算结果。
+- `pnpm run test:admin-metrics` 验证管理员自定义指标 SQL 的受控执行。
+
+## Repository Structure
+
+```text
 src/
-├── app/                      # Next.js App Router 目录
-│   ├── layout.tsx           # 根布局组件
-│   ├── page.tsx             # 首页
-│   ├── globals.css          # 全局样式（包含 shadcn 主题变量）
-│   └── [route]/             # 其他路由页面
-├── components/              # React 组件目录
-│   └── ui/                  # shadcn/ui 基础组件（优先使用）
-│       ├── button.tsx
-│       ├── card.tsx
-│       └── ...
-├── lib/                     # 工具函数库
-│   └── utils.ts            # cn() 等工具函数
-└── hooks/                   # 自定义 React Hooks（可选）
-
-public/
-└── sales_data.json          # 本地 POC 演示数据
+  app/                  Next.js 页面和 API 路由
+  components/           工作台、认证和管理界面组件
+  modules/              认证、权限、指标、数据源和分析应用层
+scripts/                MySQL 和指标检查脚本
+tests/                  模块接口测试
+public/                 JSON 演示数据与静态资源
+.luminax/               被忽略的本地运行时状态
 ```
 
-## 核心开发规范
-
-### 1. 组件开发
-
-**优先使用 shadcn/ui 基础组件**
-
-本项目已预装完整的 shadcn/ui 组件库，位于 `src/components/ui/` 目录。开发时应优先使用这些组件作为基础：
-
-```tsx
-// ✅ 推荐：使用 shadcn 基础组件
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-
-export default function MyComponent() {
-  return (
-    <Card>
-      <CardHeader>标题</CardHeader>
-      <CardContent>
-        <Input placeholder="输入内容" />
-        <Button>提交</Button>
-      </CardContent>
-    </Card>
-  );
-}
-```
-
-**可用的 shadcn 组件清单**
-
-- 表单：`button`, `input`, `textarea`, `select`, `checkbox`, `radio-group`, `switch`, `slider`
-- 布局：`card`, `separator`, `tabs`, `accordion`, `collapsible`, `scroll-area`
-- 反馈：`alert`, `alert-dialog`, `dialog`, `toast`, `sonner`, `progress`
-- 导航：`dropdown-menu`, `menubar`, `navigation-menu`, `context-menu`
-- 数据展示：`table`, `avatar`, `badge`, `hover-card`, `tooltip`, `popover`
-- 其他：`calendar`, `command`, `carousel`, `resizable`, `sidebar`
-
-详见 `src/components/ui/` 目录下的具体组件实现。
-
-### 2. 路由开发
-
-Next.js 使用文件系统路由，在 `src/app/` 目录下创建文件夹即可添加路由：
-
-```bash
-# 创建新路由 /about
-src/app/about/page.tsx
-
-# 创建动态路由 /posts/[id]
-src/app/posts/[id]/page.tsx
-
-# 创建路由组（不影响 URL）
-src/app/(marketing)/about/page.tsx
-
-# 创建 API 路由
-src/app/api/users/route.ts
-```
-
-**页面组件示例**
-
-```tsx
-// src/app/about/page.tsx
-import { Button } from '@/components/ui/button';
-
-export const metadata = {
-  title: '关于我们',
-  description: '关于页面描述',
-};
-
-export default function AboutPage() {
-  return (
-    <div>
-      <h1>关于我们</h1>
-      <Button>了解更多</Button>
-    </div>
-  );
-}
-```
-
-**动态路由示例**
-
-```tsx
-// src/app/posts/[id]/page.tsx
-export default async function PostPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
-
-  return <div>文章 ID: {id}</div>;
-}
-```
-
-**API 路由示例**
-
-```tsx
-// src/app/api/users/route.ts
-import { NextResponse } from 'next/server';
-
-export async function GET() {
-  return NextResponse.json({ users: [] });
-}
-
-export async function POST(request: Request) {
-  const body = await request.json();
-  return NextResponse.json({ success: true });
-}
-```
-
-### 3. 依赖管理
-
-**必须使用 pnpm 管理依赖**
-
-```bash
-# ✅ 安装依赖
-pnpm install
-
-# ✅ 添加新依赖
-pnpm add package-name
-
-# ✅ 添加开发依赖
-pnpm add -D package-name
-
-# ❌ 禁止使用 npm 或 yarn
-# npm install  # 错误！
-# yarn add     # 错误！
-```
-
-项目已配置 `preinstall` 脚本，使用其他包管理器会报错。
-
-### 4. 样式开发
-
-**使用 Tailwind CSS v4**
-
-本项目使用 Tailwind CSS v4 进行样式开发，并已配置 shadcn 主题变量。
-
-```tsx
-// 使用 Tailwind 类名
-<div className="flex items-center gap-4 p-4 rounded-lg bg-background">
-  <Button className="bg-primary text-primary-foreground">
-    主要按钮
-  </Button>
-</div>
-
-// 使用 cn() 工具函数合并类名
-import { cn } from '@/lib/utils';
-
-<div className={cn(
-  "base-class",
-  condition && "conditional-class",
-  className
-)}>
-  内容
-</div>
-```
-
-**主题变量**
-
-主题变量定义在 `src/app/globals.css` 中，支持亮色/暗色模式：
-
-- `--background`, `--foreground`
-- `--primary`, `--primary-foreground`
-- `--secondary`, `--secondary-foreground`
-- `--muted`, `--muted-foreground`
-- `--accent`, `--accent-foreground`
-- `--destructive`, `--destructive-foreground`
-- `--border`, `--input`, `--ring`
-
-### 5. 表单开发
-
-推荐使用 `react-hook-form` + `zod` 进行表单开发：
-
-```tsx
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-
-const formSchema = z.object({
-  username: z.string().min(2, '用户名至少 2 个字符'),
-  email: z.string().email('请输入有效的邮箱'),
-});
-
-export default function MyForm() {
-  const form = useForm({
-    resolver: zodResolver(formSchema),
-    defaultValues: { username: '', email: '' },
-  });
-
-  const onSubmit = (data: z.infer<typeof formSchema>) => {
-    console.log(data);
-  };
-
-  return (
-    <form onSubmit={form.handleSubmit(onSubmit)}>
-      <Input {...form.register('username')} />
-      <Input {...form.register('email')} />
-      <Button type="submit">提交</Button>
-    </form>
-  );
-}
-```
-
-### 6. 数据获取
-
-**服务端组件（推荐）**
-
-```tsx
-// src/app/posts/page.tsx
-async function getPosts() {
-  const res = await fetch('https://api.example.com/posts', {
-    cache: 'no-store', // 或 'force-cache'
-  });
-  return res.json();
-}
-
-export default async function PostsPage() {
-  const posts = await getPosts();
-
-  return (
-    <div>
-      {posts.map(post => (
-        <div key={post.id}>{post.title}</div>
-      ))}
-    </div>
-  );
-}
-```
-
-**客户端组件**
-
-```tsx
-'use client';
-
-import { useEffect, useState } from 'react';
-
-export default function ClientComponent() {
-  const [data, setData] = useState(null);
-
-  useEffect(() => {
-    fetch('/api/data')
-      .then(res => res.json())
-      .then(setData);
-  }, []);
-
-  return <div>{JSON.stringify(data)}</div>;
-}
-```
-
-## 常见开发场景
-
-### 添加新页面
-
-1. 在 `src/app/` 下创建文件夹和 `page.tsx`
-2. 使用 shadcn 组件构建 UI
-3. 根据需要添加 `layout.tsx` 和 `loading.tsx`
-
-### 创建业务组件
-
-1. 在 `src/components/` 下创建组件文件（非 UI 组件）
-2. 优先组合使用 `src/components/ui/` 中的基础组件
-3. 使用 TypeScript 定义 Props 类型
-
-### 添加全局状态
-
-推荐使用 React Context 或 Zustand：
-
-```tsx
-// src/lib/store.ts
-import { create } from 'zustand';
-
-interface Store {
-  count: number;
-  increment: () => void;
-}
-
-export const useStore = create<Store>((set) => ({
-  count: 0,
-  increment: () => set((state) => ({ count: state.count + 1 })),
-}));
-```
-
-### 集成数据库
-
-推荐使用 Prisma 或 Drizzle ORM，在 `src/lib/db.ts` 中配置。
-
-## 技术栈
-
-- **框架**: Next.js 16.1.1 (App Router)
-- **UI 组件**: shadcn/ui (基于 Radix UI)
-- **样式**: Tailwind CSS v4
-- **表单**: React Hook Form + Zod
-- **图标**: Lucide React
-- **字体**: Geist Sans & Geist Mono
-- **包管理器**: pnpm 9+
-- **TypeScript**: 5.x
-
-## 参考文档
-
-- [Next.js 官方文档](https://nextjs.org/docs)
-- [shadcn/ui 组件文档](https://ui.shadcn.com)
-- [Tailwind CSS 文档](https://tailwindcss.com/docs)
-- [React Hook Form](https://react-hook-form.com)
-
-## 重要提示
-
-1. **必须使用 pnpm** 作为包管理器
-2. **优先使用 shadcn/ui 组件** 而不是从零开发基础组件
-3. **遵循 Next.js App Router 规范**，正确区分服务端/客户端组件
-4. **使用 TypeScript** 进行类型安全开发
-5. **使用 `@/` 路径别名** 导入模块（已配置）
+## Security Notes
+
+- `.env.local` 和 `.luminax/` 均为本地敏感状态，必须保持在版本控制之外。
+- 不要在终端输出、截图、日志、聊天记录或文档中暴露 `DEEPSEEK_API_KEY`、`MYSQL_PASSWORD` 或 `LUMINAX_ADMIN_TOKEN`。
+- 管理员权限、指标编写和数据范围应遵循最小权限原则；禁用用户后应验证其无法继续访问。
+- 管理员 API 在设置 `LUMINAX_ADMIN_TOKEN` 时需要令牌，在令牌为空时仅限 localhost 请求。
+
+## Troubleshooting
+
+- 应用启动后没有 MySQL 数据：确认 `LUMINAX_DATA_SOURCE=mysql`，再检查 `MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_DATABASE` 与数据库凭据，并运行 `pnpm run test:mysql`。
+- 需要在没有 MySQL 的机器上演示：将 `LUMINAX_DATA_SOURCE` 设为 `json`。这是回退模式，不应用于 MySQL 指标验收。
+- DeepSeek 解释不可用：检查 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` 和超时变量；本地分析仍应可用。
+- 无法进入管理页：确认使用系统管理员账户登录，检查用户是否处于活动状态及其 `.luminax/` 权限登记。
+- 初始登录或后续登录失败：向部署负责人索取受控凭据；不要在文档或工单中尝试记录或传播密码。
