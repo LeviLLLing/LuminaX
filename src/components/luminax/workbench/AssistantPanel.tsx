@@ -15,7 +15,6 @@ interface AssistantPanelProps {
   inputValue: string;
   isStreaming: boolean;
   status?: string | null;
-  reasoning?: string;
   suggestions: string[];
   chatAreaRef: RefObject<HTMLDivElement | null>;
   onInputChange(value: string): void;
@@ -27,7 +26,6 @@ export function AssistantPanel({
   inputValue,
   isStreaming,
   status,
-  reasoning,
   suggestions,
   chatAreaRef,
   onInputChange,
@@ -87,16 +85,6 @@ export function AssistantPanel({
             {status}
           </div>
         )}
-        {reasoning ? (
-          <details className="overflow-hidden rounded-[8px] border border-[#dedfe2] bg-white text-xs">
-            <summary className="cursor-pointer select-none px-3 py-2 font-medium text-[#666a73]">
-              思考过程
-            </summary>
-            <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-3 pb-3 text-[#303238]">
-              {reasoning}
-            </pre>
-          </details>
-        ) : null}
       </div>
 
       <form

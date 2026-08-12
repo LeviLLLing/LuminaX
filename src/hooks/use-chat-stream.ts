@@ -30,7 +30,6 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
   const [inputValue, setInputValue] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const [reasoning, setReasoning] = useState("");
   const [sessionId] = useState(createChatSessionId);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -43,7 +42,6 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
 
     setInputValue("");
     setStatus(null);
-    setReasoning("");
     setMessages((prev) => [
       ...prev,
       { role: "user", content: question },
@@ -73,7 +71,6 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
           },
           onStatus: (nextStatus) =>
             setStatus(CHAT_STATUS_LABELS[nextStatus] || nextStatus),
-          onReasoning: (fullReasoning) => setReasoning(fullReasoning),
         },
         abortController.signal
       );
@@ -112,7 +109,6 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
     inputValue,
     isStreaming,
     messages,
-    reasoning,
     sendMessage,
     setInputValue,
     status,

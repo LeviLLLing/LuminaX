@@ -31,8 +31,9 @@ export async function handleChatHttpRequest(
   const callbacks: ChatStreamCallbacks = {
     emitStatus: (status) =>
       queue.push(encodeEvent({ type: "status", status })),
-    emitReasoning: (delta) =>
-      queue.push(encodeEvent({ type: "reasoning", delta })),
+    // 推理过程不向客户端下发，避免暴露提示词/内部指令；
+    // 后端能力保留，后续如需展示可在此开启。
+    emitReasoning: () => undefined,
     emitContent: (delta) => {
       contentStreamed = true;
       queue.push(encodeEvent({ type: "content", content: delta }));
