@@ -27,20 +27,27 @@ export async function generateReportInsights(
   data: WeeklyReportData,
   model: AgentModel
 ): Promise<ReportInsights> {
+  const promptPayload = toPromptPayload(data);
+
   try {
     const response = await model.complete({
       systemPrompt: REPORT_INSIGHT_SYSTEM_PROMPT,
       messages: [
         {
           role: "user",
-          content: JSON.stringify(toPromptPayload(data)),
+          content: JSON.stringify(promptPayload),
         },
       ],
       temperature: 0.2,
     });
     const parsed = response ? extractJsonObject(response) : null;
     const result = insightSchema.safeParse(parsed);
-    if (!result.success) return buildFallbackInsights(data);
+    if (
+      !result.success ||
+      !hasOnlySupportedNumericClaims(result.data, promptPayload)
+    ) {
+      return buildFallbackInsights(data);
+    }
 
     return {
       trendSummary: result.data.trendSummary.slice(0, 6),
@@ -50,6 +57,65 @@ export async function generateReportInsights(
   } catch {
     return buildFallbackInsights(data);
   }
+}
+
+function hasOnlySupportedNumericClaims(
+  insights: z.infer<typeof insightSchema>,
+  promptPayload: ReturnType<typeof toPromptPayload>
+): boolean {
+  const allowed = new Set(extractNumericTokens(JSON.stringify(promptPayload)));
+  collectNumbers(promptPayload).forEach((value) => {
+    for (let precision = 0; precision <= 2; precision += 1) {
+      allowed.add(normalizeNumericToken(value.toFixed(precision)));
+    }
+    if (Math.abs(value) <= 2) {
+      for (let precision = 0; precision <= 2; precision += 1) {
+        allowed.add(
+          normalizeNumericToken(`${(value * 100).toFixed(precision)}%`)
+        );
+      }
+    }
+    if (Math.abs(value) >= 10_000) {
+      for (let precision = 0; precision <= 2; precision += 1) {
+        allowed.add(
+          normalizeNumericToken(`${(value / 10_000).toFixed(precision)}万`)
+        );
+      }
+    }
+  });
+
+  const output = [
+    ...insights.trendSummary,
+    ...insights.attentionItems.flatMap((item) => [
+      item.title,
+      item.evidence,
+      item.action,
+    ]),
+  ].join("\n");
+
+  return extractNumericTokens(output).every((token) => allowed.has(token));
+}
+
+function collectNumbers(value: unknown): number[] {
+  if (typeof value === "number") return Number.isFinite(value) ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap(collectNumbers);
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap(collectNumbers);
+  }
+  return [];
+}
+
+function extractNumericTokens(value: string): string[] {
+  return (value.match(/\d[\d,]*(?:\.\d+)?(?:%|万)?/g) ?? []).map(
+    normalizeNumericToken
+  );
+}
+
+function normalizeNumericToken(token: string): string {
+  const suffix = token.endsWith("%") || token.endsWith("万") ? token.at(-1) : "";
+  const numericPart = token.replace(/[,%万]/g, "");
+  const numericValue = Number(numericPart);
+  return Number.isFinite(numericValue) ? `${numericValue}${suffix}` : token;
 }
 
 function toPromptPayload(data: WeeklyReportData) {

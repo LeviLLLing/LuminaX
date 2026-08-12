@@ -8,6 +8,7 @@ export const reportApplication = createReportApplication({
   loadSalesData: () => salesDataRepository.loadSalesData(),
   filterSalesData: (userId, data) =>
     accessControl.filterSalesData(userId, data),
+  authorizeScope: (request) => accessControl.authorizeScope(request),
   getContext: (user) => workbenchContextApplication.getContext(user),
   async findAuthenticatedUser(userId) {
     const user = await permissionRepository.findByIdOrUsername(userId);

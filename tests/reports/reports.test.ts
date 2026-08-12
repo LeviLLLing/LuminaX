@@ -1,14 +1,77 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { JsonSalesDataSource } from "../../src/modules/data-source/json-sales-data-source";
+import { DataAccessDeniedError } from "../../src/modules/admin/permissions/access-control";
 import { FakeAgentModel } from "../fixtures/fake-agent-model";
 import { buildWeeklyReportData } from "../../src/modules/reports/report-data-builder";
+import { createReportApplication } from "../../src/modules/reports/report-application";
 import { generateWeeklyReportHTML } from "../../src/modules/reports/report-engine";
 import { escapeReportHtml } from "../../src/modules/reports/report-html-escape";
 import { generateReportInsights } from "../../src/modules/reports/report-insight-generator";
 import type { ReportInsights } from "../../src/modules/reports/report-model";
 
 const jsonDataSource = new JsonSalesDataSource();
+
+test("report application enforces the complete server-side report scope", async () => {
+  const salesData = await jsonDataSource.loadSalesData();
+  let generated = false;
+  const application = createReportApplication({
+    async loadSalesData() {
+      return salesData;
+    },
+    async filterSalesData(_userId, data) {
+      return data as unknown as Record<
+        string,
+        Array<Record<string, unknown>>
+      >;
+    },
+    async getContext() {
+      return {
+        templateId: "regional_manager",
+        availableStoreIds: ["S001", "S002"],
+        availableMetricCodes: ["report"],
+        availableIntents: ["report"],
+        canAccessAdmin: false,
+      };
+    },
+    async findAuthenticatedUser() {
+      return {
+        id: "manager-one",
+        username: "manager.one",
+        displayName: "Manager One",
+        role: "manager",
+      };
+    },
+    async authorizeScope(request) {
+      assert.equal(request.strictStoreScope, true);
+      assert.deepEqual(request.requestedStoreIds, ["S002"]);
+      assert.ok(
+        request.requirements.some(
+          ({ tableName, columns }) =>
+            tableName === "store_sales_daily" &&
+            columns.includes("avg_order_value") &&
+            columns.includes("refund_amount")
+        )
+      );
+      throw new DataAccessDeniedError("incomplete report scope");
+    },
+    async generateHTML() {
+      generated = true;
+      return "must not generate";
+    },
+  });
+
+  await assert.rejects(
+    application.generate({
+      userId: "manager-one",
+      startDate: "2025-05-01",
+      endDate: "2025-05-14",
+      storeIds: ["S002"],
+    }),
+    /incomplete report scope/
+  );
+  assert.equal(generated, false);
+});
 
 test("report renderers consume the stable weekly report model", async () => {
   const salesData = await jsonDataSource.loadSalesData();
@@ -105,6 +168,37 @@ test("report insight generator silently falls back on invalid model output", asy
   assert.equal(result.source, "fallback");
   assert.ok(result.trendSummary.length > 0);
   assert.ok(result.attentionItems.length > 0);
+});
+
+test("report insight generator rejects unsupported numeric claims", async () => {
+  const salesData = await jsonDataSource.loadSalesData();
+  const reportData = buildWeeklyReportData(
+    salesData,
+    "2025-05-01",
+    "2025-05-14"
+  );
+  const model = new FakeAgentModel("report-model", () =>
+    JSON.stringify({
+      trendSummary: [
+        "Sales increased by 987654.321%.",
+        "Channel mix changed.",
+        "Order performance needs review.",
+        "Store performance differs.",
+      ],
+      attentionItems: [
+        {
+          severity: "high",
+          title: "Unsupported claim",
+          evidence: "The increase was 987654.321%.",
+          action: "Review the source data.",
+        },
+      ],
+    })
+  );
+
+  const result = await generateReportInsights(reportData, model);
+
+  assert.equal(result.source, "fallback");
 });
 
 test("report HTML escaping treats model content as plain text", () => {
