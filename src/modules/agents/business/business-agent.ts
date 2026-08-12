@@ -35,12 +35,17 @@ import type {
   SqlMetricIntent,
   SqlMetricQueryExecutor,
 } from "@/modules/metrics/sql-metric-query-executor";
+import {
+  NOOP_CHAT_STREAM,
+  type ChatStreamCallbacks,
+} from "@/modules/chat/chat-stream";
 
 export interface BusinessAgentRequest extends GovernanceHandoff {
   userId?: string;
   storeIds?: string[];
   startDate?: string;
   endDate?: string;
+  stream?: ChatStreamCallbacks;
 }
 
 export interface BusinessAgentResult {
@@ -158,6 +163,7 @@ export function createBusinessAgent({
             intent: `custom_metric:${customMetric.code}`,
             analysisData,
             fallbackContent,
+            stream: request.stream,
           });
           return createResult(intentResult, content, storeIds, startDate, endDate);
         } catch (error) {
@@ -243,6 +249,7 @@ export function createBusinessAgent({
               question: request.question,
               analysisData: attributionData,
               fallbackContent,
+              stream: request.stream,
             })
           : await generateBusinessAnswer({
               model,
@@ -252,6 +259,7 @@ export function createBusinessAgent({
               intent: intentResult.intent,
               analysisData,
               fallbackContent,
+              stream: request.stream,
             });
 
       if (intentResult.intent === "attribution") {
@@ -300,6 +308,7 @@ interface BusinessAnswerInput {
   intent: string;
   analysisData: Record<string, unknown> | null;
   fallbackContent: string;
+  stream?: ChatStreamCallbacks;
 }
 
 async function generateBusinessAnswer({
@@ -310,6 +319,7 @@ async function generateBusinessAnswer({
   intent,
   analysisData,
   fallbackContent,
+  stream,
 }: BusinessAnswerInput): Promise<string> {
   const prompt = [
     "## 用户问题",
@@ -326,6 +336,9 @@ async function generateBusinessAnswer({
     "",
     "请仅依据以上数据生成回答。",
   ].join("\n");
+  const streamCallbacks = stream || NOOP_CHAT_STREAM;
+  streamCallbacks.emitStatus("reasoning");
+  let answered = false;
   const content = await model.complete({
     systemPrompt: BUSINESS_SYSTEM_PROMPT,
     messages: [
@@ -333,6 +346,14 @@ async function generateBusinessAnswer({
       { role: "user", content: prompt },
     ],
     temperature: 0.2,
+    onReasoning: (delta) => streamCallbacks.emitReasoning(delta),
+    onToken: (delta) => {
+      if (!answered) {
+        answered = true;
+        streamCallbacks.emitStatus("answering");
+      }
+      streamCallbacks.emitContent(delta);
+    },
   });
   const result = content || fallbackContent;
 

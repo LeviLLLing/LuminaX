@@ -6,6 +6,10 @@ import {
   serializePromptData,
 } from "@/modules/agents/shared/prompt-utils";
 import { localizeFactorName } from "@/modules/attribution/attribution-labels";
+import {
+  NOOP_CHAT_STREAM,
+  type ChatStreamCallbacks,
+} from "@/modules/chat/chat-stream";
 import type {
   AttributionKnowledgeDocument,
   AttributionKnowledgeRetriever,
@@ -16,6 +20,7 @@ export interface AttributionAgentRequest {
   question: string;
   analysisData: Record<string, unknown>;
   fallbackContent: string;
+  stream?: ChatStreamCallbacks;
 }
 
 export interface AttributionAgent {
@@ -40,6 +45,9 @@ export function createAttributionAgent({
         request
       );
       const prompt = buildAttributionPrompt(request, documents);
+      const stream = request.stream || NOOP_CHAT_STREAM;
+      stream.emitStatus("reasoning");
+      let answered = false;
       const content = await model.complete({
         systemPrompt: ATTRIBUTION_SYSTEM_PROMPT,
         messages: [
@@ -47,6 +55,13 @@ export function createAttributionAgent({
           { role: "user", content: prompt },
         ],
         temperature: 0.15,
+        onReasoning: (delta) => stream.emitReasoning(delta),
+        onToken: () => {
+          if (!answered) {
+            answered = true;
+            stream.emitStatus("answering");
+          }
+        },
       });
       // 优先解析结构化 JSON；解析失败则原样返回模型文本（兼容旧行为）
       const result = content

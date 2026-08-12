@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import type { ChatMessage } from "@/modules/domain/ui-types";
 import {
+  CHAT_STATUS_LABELS,
   ChatStreamError,
   streamChatMessage,
 } from "@/modules/chat/chat-stream-client";
@@ -28,6 +29,8 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [inputValue, setInputValue] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [reasoning, setReasoning] = useState("");
   const [sessionId] = useState(createChatSessionId);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -39,6 +42,8 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
     if (!question || isStreaming) return;
 
     setInputValue("");
+    setStatus(null);
+    setReasoning("");
     setMessages((prev) => [
       ...prev,
       { role: "user", content: question },
@@ -66,6 +71,9 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
               })
             );
           },
+          onStatus: (nextStatus) =>
+            setStatus(CHAT_STATUS_LABELS[nextStatus] || nextStatus),
+          onReasoning: (fullReasoning) => setReasoning(fullReasoning),
         },
         abortController.signal
       );
@@ -104,8 +112,10 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
     inputValue,
     isStreaming,
     messages,
+    reasoning,
     sendMessage,
     setInputValue,
+    status,
   };
 }
 

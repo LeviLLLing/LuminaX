@@ -9,6 +9,10 @@ import {
   DEFAULT_START_DATE,
 } from "@/modules/domain/constants";
 import type { IntentResult } from "@/modules/intent/intent-classifier";
+import {
+  NOOP_CHAT_STREAM,
+  type ChatStreamCallbacks,
+} from "@/modules/chat/chat-stream";
 
 export interface ChatCommand {
   question: string;
@@ -17,6 +21,7 @@ export interface ChatCommand {
   storeIds?: string[];
   startDate?: string;
   endDate?: string;
+  stream?: ChatStreamCallbacks;
 }
 
 export interface ChatResult {
@@ -65,6 +70,8 @@ export function createChatApplication({
       }
 
       const sessionId = command.sessionId?.trim() || randomUUID();
+      const stream = command.stream || NOOP_CHAT_STREAM;
+      stream.emitStatus("governance");
       const governanceResult = await governanceAgent.review({
         sessionId,
         question,
@@ -80,6 +87,7 @@ export function createChatApplication({
         };
       }
 
+      stream.emitStatus("computing");
       try {
         return await businessAgent.execute({
           ...governanceResult.handoff,
@@ -87,6 +95,7 @@ export function createChatApplication({
           storeIds: command.storeIds,
           startDate: command.startDate,
           endDate: command.endDate,
+          stream,
         });
       } catch (error) {
         if (

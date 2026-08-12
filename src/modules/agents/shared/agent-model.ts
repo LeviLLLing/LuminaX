@@ -9,6 +9,10 @@ export interface AgentModelRequest {
   systemPrompt: string;
   messages: AgentMessage[];
   temperature?: number;
+  /** 流式输出：模型推理过程增量（如 DeepSeek reasoning_content） */
+  onReasoning?: (delta: string) => void;
+  /** 流式输出：最终回答内容增量 */
+  onToken?: (delta: string) => void;
 }
 
 export interface AgentModel {
