@@ -21,12 +21,16 @@ import {
   ACHIEVEMENT_RATE_SQL,
   ANOMALY_DETECTION_SQL,
   AOV_TREND_SQL,
+  ATTRIBUTION_BENCHMARK_AGG_SQL,
+  ATTRIBUTION_BENCHMARK_BREAKDOWN_SQL,
   ATTRIBUTION_BREAKDOWN_SQL,
+  ATTRIBUTION_CATEGORY_ITEMS_SQL,
   ATTRIBUTION_CHANNEL_DAILY_SQL,
   ATTRIBUTION_DAILY_SQL,
   ATTRIBUTION_FEEDBACK_SQL,
   ATTRIBUTION_PROMOTION_SQL,
   ATTRIBUTION_REFUND_SQL,
+  ATTRIBUTION_REFUND_REASONS_SQL,
   ATTRIBUTION_STORES_SQL,
   ATTRIBUTION_SUMMARY_SQL,
   CHANNEL_MIX_SQL,
@@ -44,6 +48,16 @@ import {
   REPORT_STORE_RANKING_SQL,
   REPORT_SUMMARY_SQL,
 } from "./mysql-metric-queries";
+import {
+  dayCount,
+  readBenchmarkKind,
+  resolveBenchmarkSelection,
+  type AttributionAggregate,
+  type AttributionDimensionTotals,
+  type AttributionScope,
+  type BenchmarkSelection,
+} from "@/modules/attribution/benchmark-resolver";
+import { enrichAttributionV2 } from "@/modules/attribution/attribution-enrichment";
 
 interface StoreIdRow extends RowDataPacket {
   storeId: string;
@@ -190,6 +204,7 @@ interface CompareFeedbackRow extends RowDataPacket {
 interface AttributionSummaryRow extends RowDataPacket {
   totalSales: number;
   totalTarget: number;
+  totalOrderTarget: number;
   achievementRate: number;
   totalOrders: number;
   avgOrderValue: number;
@@ -210,6 +225,7 @@ interface AttributionSummaryRow extends RowDataPacket {
 interface AttributionStoreRow extends RowDataPacket {
   storeId: string;
   storeName: string;
+  storeType: string;
 }
 
 interface AttributionDailyRow extends RowDataPacket {
@@ -244,6 +260,8 @@ interface AttributionFeedbackRow extends RowDataPacket {
   feedback_type: string;
   feedback_detail: string;
   manager_name: string;
+  affected_daypart: string;
+  affected_channel: string;
 }
 
 interface AttributionPromotionRow extends RowDataPacket {
@@ -254,6 +272,27 @@ interface AttributionPromotionRow extends RowDataPacket {
   totalPromoUnits: number;
   promoCount: number;
   salesRank: number;
+}
+
+interface BenchmarkAggRow extends RowDataPacket {
+  total_sales: number;
+  total_orders: number;
+  total_customers: number;
+  total_refund: number;
+  total_cancelled: number;
+  total_promo_sales: number;
+  total_promo_orders: number;
+}
+
+interface RefundReasonRow extends RowDataPacket {
+  reason: string;
+  amount: number;
+  orders: number;
+}
+
+interface CategoryItemsRow extends RowDataPacket {
+  order_count: number;
+  item_count: number;
 }
 
 interface ReportSummaryRow extends RowDataPacket {
@@ -682,6 +721,9 @@ export class MySqlSqlMetricQueryExecutor implements SqlMetricQueryExecutor {
       refunds,
       feedback,
       promotions,
+      refundReasons,
+      periodItems,
+      periodAggRows,
     ] = await Promise.all([
       this.queryScoped<AttributionSummaryRow>(ATTRIBUTION_SUMMARY_SQL, scope),
       this.queryScoped<AttributionStoreRow>(ATTRIBUTION_STORES_SQL, scope),
@@ -691,11 +733,14 @@ export class MySqlSqlMetricQueryExecutor implements SqlMetricQueryExecutor {
       this.queryScoped<AttributionRefundRow>(ATTRIBUTION_REFUND_SQL, scope),
       this.queryScoped<AttributionFeedbackRow>(ATTRIBUTION_FEEDBACK_SQL, scope),
       this.queryScoped<AttributionPromotionRow>(ATTRIBUTION_PROMOTION_SQL, scope),
+      this.queryScoped<RefundReasonRow>(ATTRIBUTION_REFUND_REASONS_SQL, scope),
+      this.queryScoped<CategoryItemsRow>(ATTRIBUTION_CATEGORY_ITEMS_SQL, scope),
+      this.queryScoped<BenchmarkAggRow>(ATTRIBUTION_BENCHMARK_AGG_SQL, scope),
     ]);
     const summary = summaries[0];
     if (!summary) return null;
     const promotion = promotions[0];
-    const data: AttributionData = {
+    const base: AttributionData = {
       dateRange: dateRange(scope),
       storeIds: scope.storeIds,
       storeNames: Object.fromEntries(
@@ -768,10 +813,149 @@ export class MySqlSqlMetricQueryExecutor implements SqlMetricQueryExecutor {
             promotion_name: row.promotion_name,
             promo_sales: row.promo_sales,
             promo_orders: row.promo_orders,
-          })),
+        })),
       },
     };
-    return data as unknown as Record<string, unknown>;
+
+    // ---- v2 增强：基准 + 缺口分解 + 因子 + 反馈信号 ----
+    const attributionScope: AttributionScope = {
+      storeIds: scope.storeIds,
+      startDate: scope.startDate,
+      endDate: scope.endDate,
+    };
+    const benchmarkKind = readBenchmarkKind();
+    let selection = resolveBenchmarkSelection(
+      attributionScope,
+      benchmarkKind
+    );
+    if (benchmarkKind === "peer_group") {
+      const peers = resolvePeerStoreIds(stores, scope.storeIds);
+      selection =
+        peers.length > 0
+          ? resolveBenchmarkSelection(attributionScope, "peer_group", peers)
+          : resolveBenchmarkSelection(attributionScope, "historical");
+    }
+
+    const periodAgg = periodAggRows[0];
+    const periodAggregate: AttributionAggregate = {
+      sales: summary.totalSales,
+      orders: summary.totalOrders,
+      customers: periodAgg?.total_customers ?? 0,
+      target: summary.totalTarget,
+      orderTarget: summary.totalOrderTarget,
+      refund: summary.totalRefund,
+      cancelled: summary.totalCancelled,
+      promoSales: promotion?.totalDiscount ?? 0,
+      promoOrders: promotion?.totalPromoUnits ?? 0,
+    };
+
+    let benchmarkAggregate: AttributionAggregate;
+    let benchmarkDimensions: AttributionDimensionTotals = {
+      channel: {},
+      daypart: {},
+      category: {},
+    };
+    let benchmarkItems = { orders: 0, items: 0 };
+
+    if (selection.kind === "target") {
+      benchmarkAggregate = {
+        sales: summary.totalTarget,
+        orders: summary.totalOrderTarget,
+        customers: 0,
+        target: summary.totalTarget,
+        orderTarget: summary.totalOrderTarget,
+        refund: 0,
+        cancelled: 0,
+        promoSales: 0,
+        promoOrders: 0,
+      };
+    } else if (selection.kind === "historical") {
+      const days = dayCount(scope.startDate, scope.endDate);
+      benchmarkAggregate = {
+        sales: summary.avgDailySales * days,
+        orders: summary.avgDailyOrders * days,
+        customers: 0,
+        target: summary.totalTarget,
+        orderTarget: summary.totalOrderTarget,
+        refund: 0,
+        cancelled: 0,
+        promoSales: 0,
+        promoOrders: 0,
+      };
+    } else {
+      const [benchAggRows, benchBreakdowns, benchItemsRows] =
+        await Promise.all([
+          this.queryWindow<BenchmarkAggRow>(
+            ATTRIBUTION_BENCHMARK_AGG_SQL,
+            selection
+          ),
+          this.queryWindow<BreakdownRow>(
+            ATTRIBUTION_BENCHMARK_BREAKDOWN_SQL,
+            selection
+          ),
+          this.queryWindow<CategoryItemsRow>(
+            ATTRIBUTION_CATEGORY_ITEMS_SQL,
+            selection
+          ),
+        ]);
+      const benchAgg = benchAggRows[0];
+      benchmarkAggregate = {
+        sales: benchAgg?.total_sales ?? 0,
+        orders: benchAgg?.total_orders ?? 0,
+        customers: benchAgg?.total_customers ?? 0,
+        target: summary.totalTarget,
+        orderTarget: summary.totalOrderTarget,
+        refund: benchAgg?.total_refund ?? 0,
+        cancelled: benchAgg?.total_cancelled ?? 0,
+        promoSales: benchAgg?.total_promo_sales ?? 0,
+        promoOrders: benchAgg?.total_promo_orders ?? 0,
+      };
+      benchmarkDimensions = toDimensionTotals(benchBreakdowns);
+      benchmarkItems = {
+        orders: benchItemsRows[0]?.order_count ?? 0,
+        items: benchItemsRows[0]?.item_count ?? 0,
+      };
+    }
+
+    const enriched = enrichAttributionV2(base, {
+      scope: attributionScope,
+      benchmarkKind: selection.kind,
+      benchmarkLabel: selection.label,
+      benchmarkWindow: selection.window,
+      period: periodAggregate,
+      benchmark: benchmarkAggregate,
+      dimensions: {
+        period: toDimensionTotals(breakdowns),
+        benchmark: benchmarkDimensions,
+      },
+      categoryItems: {
+        period: {
+          orders: periodItems[0]?.order_count ?? 0,
+          items: periodItems[0]?.item_count ?? 0,
+        },
+        benchmark: benchmarkItems,
+      },
+      refundReasons: refundReasons.map((row) => ({
+        reason: row.reason,
+        amount: row.amount,
+        orders: row.orders,
+      })),
+      feedbackRows: feedback.map((row) => ({
+        date: row.date,
+        storeId: row.store_id,
+        type: row.feedback_type,
+        detail: row.feedback_detail,
+        daypart: row.affected_daypart,
+        channel: row.affected_channel,
+      })),
+      storeInfo: Object.fromEntries(
+        stores.map((store) => [
+          store.storeId,
+          { storeType: store.storeType, openingDate: "" },
+        ])
+      ),
+    });
+    return enriched as unknown as Record<string, unknown>;
   }
 
   private async executeReport(
@@ -821,6 +1005,20 @@ export class MySqlSqlMetricQueryExecutor implements SqlMetricQueryExecutor {
     const [rows] = await this.pool.query<TRow[]>(options);
     return rows.map((row) => normalizeExternalStoreRecord(row));
   }
+
+  private queryWindow<TRow extends RowDataPacket>(
+    sql: string,
+    selection: BenchmarkSelection
+  ): Promise<TRow[]> {
+    if (!selection.window) {
+      throw new SqlMetricQueryError("基准窗口缺失，无法执行窗口查询。");
+    }
+    return this.queryRows<TRow>(sql, [
+      JSON.stringify(selection.storeIds.map(toDatabaseStoreId)),
+      selection.window.start,
+      selection.window.end,
+    ]);
+  }
 }
 
 function validateScope(scope: SqlMetricScope): void {
@@ -864,4 +1062,46 @@ function toBreakdownRecord(
   rows: BreakdownRow[]
 ): Record<string, number> {
   return Object.fromEntries(rows.map((row) => [row.dimensionName, row.value]));
+}
+
+function toDimensionTotals(
+  rows: BreakdownRow[]
+): AttributionDimensionTotals {
+  const totals: AttributionDimensionTotals = {
+    channel: {},
+    daypart: {},
+    category: {},
+  };
+  for (const row of rows) {
+    if (
+      row.dimensionType === "channel" ||
+      row.dimensionType === "daypart" ||
+      row.dimensionType === "category"
+    ) {
+      totals[row.dimensionType][row.dimensionName] = row.value;
+    }
+  }
+  return totals;
+}
+
+function resolvePeerStoreIds(
+  stores: AttributionStoreRow[],
+  targetIds: string[]
+): string[] {
+  const targetTypes = new Set(
+    stores
+      .filter((store) => targetIds.includes(store.storeId))
+      .map((store) => store.storeType)
+  );
+  return [
+    ...new Set(
+      stores
+        .filter(
+          (store) =>
+            !targetIds.includes(store.storeId) &&
+            targetTypes.has(store.storeType)
+        )
+        .map((store) => store.storeId)
+    ),
+  ];
 }

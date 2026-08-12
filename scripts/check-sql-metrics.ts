@@ -3,6 +3,12 @@ import { config as loadEnvironment } from "dotenv";
 import { formatLocalAnalysis } from "../src/modules/chat/local-answer-formatter";
 import { readDatabaseConfig } from "../src/modules/data-source/data-source-factory";
 import { MySqlSalesDataSource } from "../src/modules/data-source/mysql-sales-data-source";
+import { computeAttributionData } from "../src/modules/attribution/attribution-engine";
+import type { AttributionData } from "../src/modules/attribution/attribution-types";
+import {
+  DEFAULT_END_DATE,
+  DEFAULT_START_DATE,
+} from "../src/modules/domain/constants";
 import {
   computeAchievementRate,
   computeAOVTrend,
@@ -104,10 +110,7 @@ async function verifyLegacyParity(
     scope.endDate,
     salesData
   );
-  assert.deepEqual(
-    normalizeNumbers(achievement.overall),
-    normalizeNumbers(legacyAchievement.overall)
-  );
+  assertApproxDeepEqual(achievement.overall, legacyAchievement.overall);
 
   const order = (await executor.execute("order_trend", scope)).data as {
     stores: Array<Record<string, unknown>>;
@@ -118,10 +121,7 @@ async function verifyLegacyParity(
     scope.endDate,
     salesData
   );
-  assert.deepEqual(
-    normalizeNumbers(order.stores),
-    normalizeNumbers(legacyOrder.stores)
-  );
+  assertApproxDeepEqual(order.stores, legacyOrder.stores);
 
   const aov = (await executor.execute("aov_trend", scope)).data as {
     stores: Array<Record<string, unknown>>;
@@ -132,10 +132,7 @@ async function verifyLegacyParity(
     scope.endDate,
     salesData
   );
-  assert.deepEqual(
-    normalizeNumbers(aov.stores),
-    normalizeNumbers(legacyAov.stores)
-  );
+  assertApproxDeepEqual(aov.stores, legacyAov.stores);
 
   const channel = (await executor.execute("channel_mix", scope)).data as {
     channelPct: Array<Record<string, unknown>>;
@@ -146,10 +143,7 @@ async function verifyLegacyParity(
     scope.endDate,
     salesData
   );
-  assert.deepEqual(
-    normalizeNumbers(channel.channelPct),
-    normalizeNumbers(legacyChannel.channelPct)
-  );
+  assertApproxDeepEqual(channel.channelPct, legacyChannel.channelPct);
 
   const daypart = (await executor.execute("daypart_analysis", scope)).data as {
     daypartPct: Array<Record<string, unknown>>;
@@ -160,10 +154,7 @@ async function verifyLegacyParity(
     scope.endDate,
     salesData
   );
-  assert.deepEqual(
-    normalizeNumbers(daypart.daypartPct),
-    normalizeNumbers(legacyDaypart.daypartPct)
-  );
+  assertApproxDeepEqual(daypart.daypartPct, legacyDaypart.daypartPct);
 
   const promotion = (await executor.execute("promotion_contribution", scope))
     .data as {
@@ -178,10 +169,7 @@ async function verifyLegacyParity(
     scope.endDate,
     salesData
   );
-  assert.equal(promotion.totalSales, legacyPromotion.totalSales);
-  assert.equal(promotion.totalDiscount, legacyPromotion.totalDiscount);
-  assert.equal(promotion.totalPromoUnits, legacyPromotion.totalPromoUnits);
-  assert.equal(promotion.contributionRate, legacyPromotion.contributionRate);
+  assertApproxDeepEqual(promotion, legacyPromotion);
 
   const refund = (await executor.execute("refund_rate", scope)).data as {
     totalSales: number;
@@ -197,25 +185,85 @@ async function verifyLegacyParity(
     scope.endDate,
     salesData
   );
+  // 与原脚本语义一致：只对比顶层标量；明细数组两侧排序规则不同，不纳入 parity
   assert.equal(refund.totalSales, legacyRefund.totalSales);
   assert.equal(refund.totalRefund, legacyRefund.totalRefund);
   assert.equal(refund.totalCancelled, legacyRefund.totalCancelled);
   assert.equal(refund.totalOrders, legacyRefund.totalOrders);
-  assert.equal(refund.refundRate, legacyRefund.refundRate);
-  assert.equal(refund.cancelRate, legacyRefund.cancelRate);
+  assertApproxDeepEqual(refund.refundRate, legacyRefund.refundRate);
+  assertApproxDeepEqual(refund.cancelRate, legacyRefund.cancelRate);
+
+  const attribution = (await executor.execute("attribution", scope)).data as
+    | AttributionData
+    | null;
+  const legacyAttribution = computeAttributionData(
+    {
+      storeIds: scope.storeIds,
+      startDate: scope.startDate,
+      endDate: scope.endDate,
+    },
+    DEFAULT_START_DATE,
+    DEFAULT_END_DATE,
+    salesData
+  );
+  assert.ok(attribution, "attribution returned no data");
+  assert.equal(
+    attribution!.salesSummary.totalSales,
+    legacyAttribution.salesSummary.totalSales
+  );
+  assert.equal(
+    attribution!.decomposition?.totalGap,
+    legacyAttribution.decomposition?.totalGap
+  );
+  assert.ok(
+    (attribution!.factorContributions?.length ?? 0) > 0,
+    "attribution factorContributions missing"
+  );
+  console.log("attribution: SQL/JS parity OK");
 }
 
-function normalizeNumbers(value: unknown): unknown {
-  if (typeof value === "number") {
-    return Math.round(value * 100_000_000) / 100_000_000;
-  }
-  if (Array.isArray(value)) return value.map(normalizeNumbers);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, normalizeNumbers(item)])
+/**
+ * 递归近似比较：MySQL 除法结果小数位随表达式变化（4~6 位），
+ * 与遗留 JS 双精度结果之间存在浮点刻度差，使用容差比较。
+ */
+function assertApproxDeepEqual(
+  actual: unknown,
+  expected: unknown,
+  epsilon = 0.001
+): void {
+  if (typeof actual === "number" && typeof expected === "number") {
+    assert.ok(
+      Math.abs(actual - expected) <= epsilon,
+      `numbers differ: ${actual} vs ${expected}`
     );
+    return;
   }
-  return value;
+  if (Array.isArray(actual) && Array.isArray(expected)) {
+    assert.equal(actual.length, expected.length, "array length differs");
+    actual.forEach((item, index) =>
+      assertApproxDeepEqual(item, expected[index], epsilon)
+    );
+    return;
+  }
+  if (
+    actual &&
+    expected &&
+    typeof actual === "object" &&
+    typeof expected === "object"
+  ) {
+    const actualKeys = Object.keys(actual as Record<string, unknown>).sort();
+    const expectedKeys = Object.keys(expected as Record<string, unknown>).sort();
+    assert.deepEqual(actualKeys, expectedKeys, "object keys differ");
+    for (const key of actualKeys) {
+      assertApproxDeepEqual(
+        (actual as Record<string, unknown>)[key],
+        (expected as Record<string, unknown>)[key],
+        epsilon
+      );
+    }
+    return;
+  }
+  assert.deepEqual(actual, expected);
 }
 
 void main().catch((error: unknown) => {

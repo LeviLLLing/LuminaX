@@ -101,11 +101,12 @@ export function extractDateRange(question: string): { start: string | null; end:
   if (isoDates.length === 1) return { start: isoDates[0], end: isoDates[0] };
 
   const monthDayDates = [
-    ...question.matchAll(/(?:2025年)?\s*(\d{1,2})月(\d{1,2})日/g),
+    ...question.matchAll(/(?:(\d{4})年)?\s*(\d{1,2})月(\d{1,2})(?:日|号)/g),
   ].map((match) => {
-    const month = match[1].padStart(2, "0");
-    const day = match[2].padStart(2, "0");
-    return `2025-${month}-${day}`;
+    const year = match[1] || "2025";
+    const month = match[2].padStart(2, "0");
+    const day = match[3].padStart(2, "0");
+    return `${year}-${month}-${day}`;
   });
 
   if (monthDayDates.length >= 2) {

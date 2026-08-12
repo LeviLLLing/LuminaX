@@ -49,6 +49,7 @@ export interface SalesByCategory {
   category: string;
   sales_amount: number;
   order_count: number;
+  item_count?: number;
 }
 
 export interface PromotionDaily {
