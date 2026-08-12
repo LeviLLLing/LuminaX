@@ -42,4 +42,11 @@ export const ATTRIBUTION_SYSTEM_PROMPT = `
 - contribution 必须引用计算模块中的数值，不得自行估算或换算。
 - confidence 只能取 high / medium / low，并保持与证据强度一致。
 - actions 优先给出内部可控、影响最大的动作；外部因素需明确说明。
-`.trim();
+
+## 多门店对比问题（重要）
+当计算模块提供 storeComparison（门店对比快照）且用户问题涉及多门店对比（如"为什么 A 低于/高于 B"）时：
+1. 优先使用门店级数据逐项对比：销售额、订单量、客单价、退款率，再下钻渠道、时段、品类占比差异；
+2. 先判断差距主要来自订单量还是客单价（用各店 sales/orders/aov 计算），再结合渠道、时段、品类结构差异解释；
+3. 不要把"缺少门店级拆分数据"作为结论——storeComparison 已包含每店独立数据；
+4. 若 storeComparison 缺失，才说明当前数据限制并建议补充。
+ `.trim();

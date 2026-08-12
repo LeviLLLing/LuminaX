@@ -218,17 +218,30 @@ export function createBusinessAgent({
         });
       }
 
+      // 归因问题：当范围含多家门店时，追加门店对比快照，
+      // 让归因 Agent 能回答"为什么 A 低于/高于 B"这类跨门店问题
+      const attributionData =
+        intentResult.intent === "attribution" && analysisData
+          ? await enrichAttributionWithComparison(
+              metricQueryExecutor,
+              storeIds,
+              startDate,
+              endDate,
+              analysisData
+            )
+          : analysisData;
+
       const fallbackContent = formatLocalAnalysis(
         metricIntent,
-        analysisData
+        attributionData
       );
 
       const content =
-        intentResult.intent === "attribution" && analysisData
+        intentResult.intent === "attribution" && attributionData
           ? await attributionAgent.analyze({
               sessionId: request.sessionId,
               question: request.question,
-              analysisData,
+              analysisData: attributionData,
               fallbackContent,
             })
           : await generateBusinessAnswer({
@@ -345,4 +358,34 @@ function createResult(
     startDate,
     endDate,
   };
+}
+
+/**
+ * 归因增强：scope 含多家门店时，执行 compare 指标并合并为 storeComparison 快照。
+ * compare 失败不阻断归因主流程（降级为仅有合并数据）。
+ */
+async function enrichAttributionWithComparison(
+  metricQueryExecutor: SqlMetricQueryExecutor,
+  storeIds: string[],
+  startDate: string,
+  endDate: string,
+  analysisData: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  if (storeIds.length < 2) return analysisData;
+  try {
+    const comparison = await metricQueryExecutor.execute("compare", {
+      storeIds,
+      startDate,
+      endDate,
+    });
+    if (comparison.data) {
+      return { ...analysisData, storeComparison: comparison.data };
+    }
+  } catch (error) {
+    console.error(
+      "Failed to enrich attribution with store comparison:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
+  }
+  return analysisData;
 }

@@ -41,6 +41,44 @@ export function formatAttribution(data: Record<string, unknown>): string {
     "建议先复盘异常日期和门店反馈，再按渠道、时段和品类继续拆解销售缺口。",
   ];
 
+  // ---- v2：多门店对比快照（compare 合并数据，跨门店问题专用）----
+  const comparison = (
+    attributionData as AttributionData & {
+      storeComparison?: {
+        stores?: Array<{
+          storeId: string;
+          storeName: string;
+          totalSales: number;
+          totalTarget: number;
+          achievementRate: string;
+          totalOrders: number;
+          avgOrderValue: number;
+          refundRate: string;
+        }>;
+      };
+    }
+  ).storeComparison;
+  if (comparison?.stores?.length) {
+    const anchor = lines.indexOf("### 结构拆解") + 3;
+    lines.splice(
+      anchor,
+      0,
+      "",
+      "### 门店对比",
+      "| 门店 | 销售额 | 目标 | 达成率 | 订单量 | 客单价 | 退款率 |",
+      "|---|---:|---:|---:|---:|---:|---:|",
+      ...comparison.stores.map(
+        (store) =>
+          `| ${store.storeName}（${store.storeId}） | ${money(
+            store.totalSales
+          )} | ${money(store.totalTarget)} | ${store.achievementRate} | ${num(
+            store.totalOrders
+          )} | ${money(store.avgOrderValue)} | ${store.refundRate} |`
+      ),
+      ""
+    );
+  }
+
   // ---- v2：缺口分解 ----
   const decomposition = attributionData.decomposition;
   if (decomposition) {
