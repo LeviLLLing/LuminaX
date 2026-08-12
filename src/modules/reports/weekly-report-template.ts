@@ -1,14 +1,18 @@
-import { buildReportAlerts } from "@/modules/reports/report-alerts";
 import { buildReportChartScripts } from "@/modules/reports/report-chart-scripts";
+import { escapeReportHtml } from "@/modules/reports/report-html-escape";
 import type {
+  ReportAttentionItem,
+  ReportInsights,
   WeeklyReportBreakdownItem,
   WeeklyReportData,
 } from "@/modules/reports/report-model";
 import { formatReportNumber } from "@/modules/reports/report-format";
-import { buildReportSummaryParts } from "@/modules/reports/report-narrative";
 import { WEEKLY_REPORT_STYLES } from "@/modules/reports/report-styles";
 
-export function renderWeeklyReportHtml(data: WeeklyReportData): string {
+export function renderWeeklyReportHtml(
+  data: WeeklyReportData,
+  insights: ReportInsights
+): string {
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -38,11 +42,11 @@ export function renderWeeklyReportHtml(data: WeeklyReportData): string {
     </div>
     <div class="section">
       <h2>经营趋势总结</h2>
-      <div class="summary-box">${buildReportSummaryParts(data).join("<br><br>")}</div>
+      <div class="summary-box">${renderTrendSummary(insights)}</div>
     </div>
     <div class="section">
       <h2>需关注信息</h2>
-      ${renderAlerts(data)}
+      ${renderAttentionItems(insights)}
     </div>
     <div class="section">
       <h2>销售 & 订单 & 客单价趋势</h2>
@@ -107,13 +111,24 @@ function renderKpi(label: string, value: string): string {
   return `<div class="kpi-card"><div class="kpi-value">${value}</div><div class="kpi-label">${label}</div></div>`;
 }
 
-function renderAlerts(data: WeeklyReportData): string {
-  return buildReportAlerts(data)
-    .map(
-      (alert) =>
-        `<div class="alert alert-${alert.tone}"><strong>${alert.title}：</strong>${alert.message}</div>`
-    )
-    .join("");
+function renderTrendSummary(insights: ReportInsights): string {
+  if (insights.source === "fallback") {
+    return insights.trendSummary.join("<br><br>");
+  }
+  return insights.trendSummary.map(escapeReportHtml).join("<br><br>");
+}
+
+function renderAttentionItems(insights: ReportInsights): string {
+  return insights.attentionItems.map(renderAttentionItem).join("");
+}
+
+function renderAttentionItem(item: ReportAttentionItem): string {
+  const tone = item.severity === "high" ? "danger" : "success";
+  const title = escapeReportHtml(item.title);
+  if (item.evidence === item.action) {
+    return `<div class="alert alert-${tone}"><strong>${title}：</strong>${escapeReportHtml(item.evidence)}</div>`;
+  }
+  return `<div class="alert alert-${tone}"><strong>${title}：</strong>${escapeReportHtml(item.evidence)} <strong>建议：</strong>${escapeReportHtml(item.action)}</div>`;
 }
 
 function renderBreakdownBars(

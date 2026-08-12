@@ -6,15 +6,18 @@ import { buildWeeklyReportData } from "../../src/modules/reports/report-data-bui
 import { generateWeeklyReportHTML } from "../../src/modules/reports/report-engine";
 import { escapeReportHtml } from "../../src/modules/reports/report-html-escape";
 import { generateReportInsights } from "../../src/modules/reports/report-insight-generator";
+import type { ReportInsights } from "../../src/modules/reports/report-model";
 
 const jsonDataSource = new JsonSalesDataSource();
 
 test("report renderers consume the stable weekly report model", async () => {
   const salesData = await jsonDataSource.loadSalesData();
-  const html = generateWeeklyReportHTML(
+  const html = await generateWeeklyReportHTML(
     salesData,
     "2025-05-05",
-    "2025-05-07"
+    "2025-05-07",
+    undefined,
+    { generateInsights: fallbackInsights }
   );
 
   assert.match(html, /^<!DOCTYPE html>/);
@@ -26,11 +29,12 @@ test("weekly report limits every aggregate to the requested store scope", async 
   const salesData = await jsonDataSource.loadSalesData();
   const includedStore = salesData.store_master[0];
   const excludedStore = salesData.store_master[1];
-  const html = generateWeeklyReportHTML(
+  const html = await generateWeeklyReportHTML(
     salesData,
     "2025-05-05",
     "2025-05-07",
-    [includedStore.store_id]
+    [includedStore.store_id],
+    { generateInsights: fallbackInsights }
   );
 
   assert.equal(html.includes(includedStore.store_name), true);
@@ -78,6 +82,8 @@ test("report insight generator uses one structured model request", async () => {
     "channelBreakdown",
     "categoryBreakdown",
     "daypartBreakdown",
+    "refundReasons",
+    "totalPromo",
     "refundRate",
     "anomalies",
   ]) {
@@ -110,3 +116,51 @@ test("report HTML escaping treats model content as plain text", () => {
     "&lt;img src=x onerror=alert(1)&gt; &amp; &quot;x&quot;"
   );
 });
+
+test("weekly report replaces only narrative sections with escaped AI insights", async () => {
+  const salesData = await jsonDataSource.loadSalesData();
+  const html = await generateWeeklyReportHTML(
+    salesData,
+    "2025-05-01",
+    "2025-05-14",
+    undefined,
+    {
+      async generateInsights() {
+        return {
+          trendSummary: ["销售趋势稳定 <script>alert(1)</script>"],
+          attentionItems: [
+            {
+              severity: "high",
+              title: "退款关注",
+              evidence: "退款率需关注 <img src=x>",
+              action: "建议进一步核查退款原因",
+            },
+          ],
+          source: "ai",
+        };
+      },
+    }
+  );
+
+  assert.match(html, /销售趋势稳定 &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(html, /退款关注/);
+  assert.equal(html.includes("<img src=x>"), false);
+  assert.match(html, /区域整体经营概览/);
+  assert.match(html, /salesTrend/);
+  assert.match(html, /storeCompare/);
+});
+
+async function fallbackInsights(): Promise<ReportInsights> {
+  return {
+    trendSummary: ["规则趋势总结"],
+    attentionItems: [
+      {
+        severity: "positive",
+        title: "运营良好",
+        evidence: "当前区域整体指标正常。",
+        action: "持续观察关键指标。",
+      },
+    ],
+    source: "fallback",
+  };
+}
