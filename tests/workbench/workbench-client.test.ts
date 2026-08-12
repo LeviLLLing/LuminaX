@@ -16,6 +16,11 @@ import {
 } from "../../src/modules/workbench/workbench-presentation";
 import { createWorkbenchContextRequestLifecycle } from "../../src/hooks/workbench-context-lifecycle";
 import type { WorkbenchContext } from "../../src/modules/workbench/workbench-types";
+import {
+  ReportClientError,
+  requestWeeklyReport,
+} from "../../src/modules/reports/report-client";
+import { createReportRequestLifecycle } from "../../src/hooks/report-request-lifecycle";
 
 test("client context normalizes templates without widening authorization", () => {
   assert.deepEqual(
@@ -179,6 +184,73 @@ test("scope bar keeps the aggregate authorized-store scope selectable", () => {
   );
 
   assert.match(html, /<option value="all" selected="">/);
+});
+
+test("weekly report client sends only the authorized report scope", async (context) => {
+  let body: unknown;
+  context.mock.method(globalThis, "fetch", async (_input: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return Response.json({ html: "<!DOCTYPE html><p>report</p>" });
+  });
+
+  const html = await requestWeeklyReport({
+    startDate: "2025-05-01",
+    endDate: "2025-05-14",
+    storeIds: ["S001"],
+  });
+
+  assert.equal(html, "<!DOCTYPE html><p>report</p>");
+  assert.deepEqual(body, {
+    startDate: "2025-05-01",
+    endDate: "2025-05-14",
+    storeIds: ["S001"],
+  });
+});
+
+test("weekly report client preserves permission errors and rejects invalid HTML payloads", async (context) => {
+  context.mock.method(globalThis, "fetch", async () =>
+    Response.json({ error: "没有周报权限" }, { status: 403 })
+  );
+  await assert.rejects(
+    requestWeeklyReport({
+      startDate: "2025-05-01",
+      endDate: "2025-05-14",
+      storeIds: ["S001"],
+    }),
+    (error: unknown) =>
+      error instanceof ReportClientError &&
+      error.status === 403 &&
+      error.message === "没有周报权限"
+  );
+
+  context.mock.restoreAll();
+  context.mock.method(globalThis, "fetch", async () =>
+    Response.json({ html: "" })
+  );
+  await assert.rejects(
+    requestWeeklyReport({
+      startDate: "2025-05-01",
+      endDate: "2025-05-14",
+      storeIds: ["S001"],
+    }),
+    ReportClientError
+  );
+});
+
+test("stale report request cannot overwrite a newer scope", () => {
+  const stale = createReportRequestLifecycle();
+  const current = createReportRequestLifecycle();
+  let html = "";
+
+  stale.deactivate();
+  current.runIfActive(() => {
+    html = "new report";
+  });
+  stale.runIfActive(() => {
+    html = "stale report";
+  });
+
+  assert.equal(html, "new report");
 });
 
 function createClientContext(): WorkbenchContext {
