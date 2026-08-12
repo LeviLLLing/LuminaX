@@ -79,6 +79,7 @@ export function LuminaXApp({ user }: { user: AuthenticatedUser }) {
           messages={chat.messages}
           inputValue={chat.inputValue}
           isStreaming={chat.isStreaming}
+          status={chat.status}
           suggestions={suggestions}
           chatAreaRef={chat.chatAreaRef}
           onInputChange={chat.setInputValue}

@@ -18,16 +18,28 @@ export interface ChatStreamRequest {
 export interface ChatStreamHandlers {
   onIntent: (metadata: IntentViewMetadata) => void;
   onContent: (content: string) => void;
+  onStatus?: (status: string) => void;
+  onReasoning?: (delta: string) => void;
 }
 
 export interface ChatStreamPayload {
-  type?: "intent" | "content";
+  type?: "intent" | "content" | "status" | "reasoning" | "error";
   intent?: AnalysisIntent;
   storeIds?: unknown;
   startDate?: unknown;
   endDate?: unknown;
   content?: unknown;
+  status?: unknown;
+  delta?: unknown;
+  error?: unknown;
 }
+
+export const CHAT_STATUS_LABELS: Record<string, string> = {
+  governance: "安全审查中",
+  computing: "计算指标中",
+  reasoning: "模型思考中",
+  answering: "生成回答中",
+};
 
 export class ChatStreamError extends Error {
   constructor(
@@ -68,14 +80,28 @@ export async function streamChatMessage(
   const decoder = new TextDecoder();
   let buffer = "";
   let fullContent = "";
+  let fullReasoning = "";
   let receivedIntent: AnalysisIntent | null = null;
 
   const consumeEvent = (event: string) => {
     for (const payload of parseServerSentEvent(event)) {
+      if (payload.type === "error" && typeof payload.error === "string") {
+        throw new ChatStreamError(500, payload.error);
+      }
+
       if (payload.type === "intent" && payload.intent) {
         const metadata = normalizeIntentMetadata(payload);
         receivedIntent = metadata.intent;
         handlers.onIntent(metadata);
+      }
+
+      if (payload.type === "status" && typeof payload.status === "string") {
+        handlers.onStatus?.(payload.status);
+      }
+
+      if (payload.type === "reasoning" && typeof payload.delta === "string") {
+        fullReasoning += payload.delta;
+        handlers.onReasoning?.(fullReasoning);
       }
 
       if (

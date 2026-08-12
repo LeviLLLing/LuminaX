@@ -35,12 +35,17 @@ import type {
   SqlMetricIntent,
   SqlMetricQueryExecutor,
 } from "@/modules/metrics/sql-metric-query-executor";
+import {
+  NOOP_CHAT_STREAM,
+  type ChatStreamCallbacks,
+} from "@/modules/chat/chat-stream";
 
 export interface BusinessAgentRequest extends GovernanceHandoff {
   userId?: string;
   storeIds?: string[];
   startDate?: string;
   endDate?: string;
+  stream?: ChatStreamCallbacks;
 }
 
 export interface BusinessAgentResult {
@@ -158,6 +163,7 @@ export function createBusinessAgent({
             intent: `custom_metric:${customMetric.code}`,
             analysisData,
             fallbackContent,
+            stream: request.stream,
           });
           return createResult(intentResult, content, storeIds, startDate, endDate);
         } catch (error) {
@@ -218,18 +224,32 @@ export function createBusinessAgent({
         });
       }
 
+      // 归因问题：当范围含多家门店时，追加门店对比快照，
+      // 让归因 Agent 能回答"为什么 A 低于/高于 B"这类跨门店问题
+      const attributionData =
+        intentResult.intent === "attribution" && analysisData
+          ? await enrichAttributionWithComparison(
+              metricQueryExecutor,
+              storeIds,
+              startDate,
+              endDate,
+              analysisData
+            )
+          : analysisData;
+
       const fallbackContent = formatLocalAnalysis(
         metricIntent,
-        analysisData
+        attributionData
       );
 
       const content =
-        intentResult.intent === "attribution" && analysisData
+        intentResult.intent === "attribution" && attributionData
           ? await attributionAgent.analyze({
               sessionId: request.sessionId,
               question: request.question,
-              analysisData,
+              analysisData: attributionData,
               fallbackContent,
+              stream: request.stream,
             })
           : await generateBusinessAnswer({
               model,
@@ -239,6 +259,7 @@ export function createBusinessAgent({
               intent: intentResult.intent,
               analysisData,
               fallbackContent,
+              stream: request.stream,
             });
 
       if (intentResult.intent === "attribution") {
@@ -287,6 +308,7 @@ interface BusinessAnswerInput {
   intent: string;
   analysisData: Record<string, unknown> | null;
   fallbackContent: string;
+  stream?: ChatStreamCallbacks;
 }
 
 async function generateBusinessAnswer({
@@ -297,6 +319,7 @@ async function generateBusinessAnswer({
   intent,
   analysisData,
   fallbackContent,
+  stream,
 }: BusinessAnswerInput): Promise<string> {
   const prompt = [
     "## 用户问题",
@@ -313,6 +336,9 @@ async function generateBusinessAnswer({
     "",
     "请仅依据以上数据生成回答。",
   ].join("\n");
+  const streamCallbacks = stream || NOOP_CHAT_STREAM;
+  streamCallbacks.emitStatus("reasoning");
+  let answered = false;
   const content = await model.complete({
     systemPrompt: BUSINESS_SYSTEM_PROMPT,
     messages: [
@@ -320,6 +346,14 @@ async function generateBusinessAnswer({
       { role: "user", content: prompt },
     ],
     temperature: 0.2,
+    onReasoning: (delta) => streamCallbacks.emitReasoning(delta),
+    onToken: (delta) => {
+      if (!answered) {
+        answered = true;
+        streamCallbacks.emitStatus("answering");
+      }
+      streamCallbacks.emitContent(delta);
+    },
   });
   const result = content || fallbackContent;
 
@@ -345,4 +379,34 @@ function createResult(
     startDate,
     endDate,
   };
+}
+
+/**
+ * 归因增强：scope 含多家门店时，执行 compare 指标并合并为 storeComparison 快照。
+ * compare 失败不阻断归因主流程（降级为仅有合并数据）。
+ */
+async function enrichAttributionWithComparison(
+  metricQueryExecutor: SqlMetricQueryExecutor,
+  storeIds: string[],
+  startDate: string,
+  endDate: string,
+  analysisData: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  if (storeIds.length < 2) return analysisData;
+  try {
+    const comparison = await metricQueryExecutor.execute("compare", {
+      storeIds,
+      startDate,
+      endDate,
+    });
+    if (comparison.data) {
+      return { ...analysisData, storeComparison: comparison.data };
+    }
+  } catch (error) {
+    console.error(
+      "Failed to enrich attribution with store comparison:",
+      error instanceof Error ? error.name : "UnknownError"
+    );
+  }
+  return analysisData;
 }

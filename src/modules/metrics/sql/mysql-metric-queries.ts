@@ -807,7 +807,9 @@ export const ATTRIBUTION_SUMMARY_SQL = `
     WHERE sales.date BETWEEN date_range.start_date AND date_range.end_date
   ),
   period_targets AS (
-    SELECT COALESCE(SUM(target.sales_target), 0) AS total_target
+    SELECT
+      COALESCE(SUM(target.sales_target), 0) AS total_target,
+      COALESCE(SUM(target.order_target), 0) AS total_order_target
     FROM sales_target_daily AS target
     JOIN requested_stores AS requested ON requested.store_id = target.store_id
     CROSS JOIN requested_range AS date_range
@@ -843,6 +845,7 @@ export const ATTRIBUTION_SUMMARY_SQL = `
       period_sales.total_sales,
       period_sales.total_orders,
       period_targets.total_target,
+      period_targets.total_order_target,
       period_refunds.total_refund,
       period_refunds.total_cancelled,
       historical.avg_daily_sales,
@@ -876,6 +879,7 @@ export const ATTRIBUTION_SUMMARY_SQL = `
   SELECT
     total_sales AS totalSales,
     total_target AS totalTarget,
+    total_order_target AS totalOrderTarget,
     CASE WHEN total_target > 0 THEN total_sales / total_target * 100 ELSE 0 END
       AS achievementRate,
     total_orders AS totalOrders,
@@ -909,7 +913,10 @@ export const ATTRIBUTION_STORES_SQL = `
   requested_range AS (
     SELECT CAST(? AS DATE) AS start_date, CAST(? AS DATE) AS end_date
   )
-  SELECT stores.store_id AS storeId, stores.store_name AS storeName
+  SELECT
+    stores.store_id AS storeId,
+    stores.store_name AS storeName,
+    stores.store_type AS storeType
   FROM requested_stores AS requested
   JOIN store_master AS stores ON stores.store_id = requested.store_id
   CROSS JOIN requested_range
@@ -1069,12 +1076,115 @@ export const ATTRIBUTION_FEEDBACK_SQL = `
     feedback.store_id,
     feedback.feedback_type,
     feedback.feedback_detail,
-    COALESCE(feedback.manager_name, '') AS manager_name
+    COALESCE(feedback.manager_name, '') AS manager_name,
+    COALESCE(feedback.affected_daypart, '') AS affected_daypart,
+    COALESCE(feedback.affected_channel, '') AS affected_channel
   FROM store_manager_feedback AS feedback
   JOIN requested_stores AS requested ON requested.store_id = feedback.store_id
   CROSS JOIN requested_range AS date_range
   WHERE feedback.date BETWEEN date_range.start_date AND date_range.end_date
   ORDER BY feedback.date, feedback.store_id
+`;
+
+export const ATTRIBUTION_BENCHMARK_AGG_SQL = `
+  WITH requested_stores AS (
+    SELECT store_id
+    FROM JSON_TABLE(?, '$[*]' COLUMNS(store_id VARCHAR(16) PATH '$')) AS scope
+  ),
+  requested_range AS (
+    SELECT CAST(? AS DATE) AS start_date, CAST(? AS DATE) AS end_date
+  ),
+  promo_totals AS (
+    SELECT
+      COALESCE(SUM(promotions.promo_sales), 0) AS promo_sales,
+      COALESCE(SUM(promotions.promo_orders), 0) AS promo_orders
+    FROM promotion_daily AS promotions
+    JOIN requested_stores AS requested ON requested.store_id = promotions.store_id
+    CROSS JOIN requested_range AS date_range
+    WHERE promotions.date BETWEEN date_range.start_date AND date_range.end_date
+  )
+  SELECT
+    COALESCE(SUM(sales.actual_sales), 0) AS total_sales,
+    COALESCE(SUM(sales.order_count), 0) AS total_orders,
+    COALESCE(SUM(sales.customer_count), 0) AS total_customers,
+    COALESCE(SUM(sales.refund_amount), 0) AS total_refund,
+    COALESCE(SUM(sales.cancelled_orders), 0) AS total_cancelled,
+    COALESCE((SELECT promo_sales FROM promo_totals), 0) AS total_promo_sales,
+    COALESCE((SELECT promo_orders FROM promo_totals), 0) AS total_promo_orders
+  FROM store_sales_daily AS sales
+  JOIN requested_stores AS requested ON requested.store_id = sales.store_id
+  CROSS JOIN requested_range AS date_range
+  WHERE sales.date BETWEEN date_range.start_date AND date_range.end_date
+`;
+
+export const ATTRIBUTION_BENCHMARK_BREAKDOWN_SQL = `
+  WITH requested_stores AS (
+    SELECT store_id
+    FROM JSON_TABLE(?, '$[*]' COLUMNS(store_id VARCHAR(16) PATH '$')) AS scope
+  ),
+  requested_range AS (
+    SELECT CAST(? AS DATE) AS start_date, CAST(? AS DATE) AS end_date
+  )
+  SELECT 'channel' AS dimensionType, data.channel AS dimensionName,
+         SUM(data.sales_amount) AS value
+  FROM sales_by_channel AS data
+  JOIN requested_stores AS requested ON requested.store_id = data.store_id
+  CROSS JOIN requested_range AS date_range
+  WHERE data.date BETWEEN date_range.start_date AND date_range.end_date
+  GROUP BY data.channel
+  UNION ALL
+  SELECT 'daypart' AS dimensionType, data.daypart AS dimensionName,
+         SUM(data.sales_amount) AS value
+  FROM sales_by_daypart AS data
+  JOIN requested_stores AS requested ON requested.store_id = data.store_id
+  CROSS JOIN requested_range AS date_range
+  WHERE data.date BETWEEN date_range.start_date AND date_range.end_date
+  GROUP BY data.daypart
+  UNION ALL
+  SELECT 'category' AS dimensionType, data.category AS dimensionName,
+         SUM(data.sales_amount) AS value
+  FROM sales_by_category AS data
+  JOIN requested_stores AS requested ON requested.store_id = data.store_id
+  CROSS JOIN requested_range AS date_range
+  WHERE data.date BETWEEN date_range.start_date AND date_range.end_date
+  GROUP BY data.category
+`;
+
+export const ATTRIBUTION_REFUND_REASONS_SQL = `
+  WITH requested_stores AS (
+    SELECT store_id
+    FROM JSON_TABLE(?, '$[*]' COLUMNS(store_id VARCHAR(16) PATH '$')) AS scope
+  ),
+  requested_range AS (
+    SELECT CAST(? AS DATE) AS start_date, CAST(? AS DATE) AS end_date
+  )
+  SELECT
+    COALESCE(NULLIF(TRIM(refund.main_reason), ''), '其他') AS reason,
+    COALESCE(SUM(refund.refund_amount), 0) AS amount,
+    COALESCE(SUM(refund.refund_orders), 0) AS orders
+  FROM refund_cancel_daily AS refund
+  JOIN requested_stores AS requested ON requested.store_id = refund.store_id
+  CROSS JOIN requested_range AS date_range
+  WHERE refund.date BETWEEN date_range.start_date AND date_range.end_date
+  GROUP BY reason
+  ORDER BY amount DESC
+`;
+
+export const ATTRIBUTION_CATEGORY_ITEMS_SQL = `
+  WITH requested_stores AS (
+    SELECT store_id
+    FROM JSON_TABLE(?, '$[*]' COLUMNS(store_id VARCHAR(16) PATH '$')) AS scope
+  ),
+  requested_range AS (
+    SELECT CAST(? AS DATE) AS start_date, CAST(? AS DATE) AS end_date
+  )
+  SELECT
+    COALESCE(SUM(data.order_count), 0) AS order_count,
+    COALESCE(SUM(data.item_count), 0) AS item_count
+  FROM sales_by_category AS data
+  JOIN requested_stores AS requested ON requested.store_id = data.store_id
+  CROSS JOIN requested_range AS date_range
+  WHERE data.date BETWEEN date_range.start_date AND date_range.end_date
 `;
 
 export const ATTRIBUTION_PROMOTION_SQL = `

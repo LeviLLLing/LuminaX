@@ -1,4 +1,7 @@
-import type { AttributionData } from "@/modules/attribution/attribution-types";
+import type {
+  AttributionData,
+  AttributionFactorContribution,
+} from "@/modules/attribution/attribution-types";
 import { scoreAttributionFactors } from "@/modules/attribution/attribution-scorer";
 
 export function describeMainIssue(
@@ -17,7 +20,26 @@ export function describeMainIssue(
 }
 
 export function buildAttributionNarrative(data: AttributionData): string {
-  const topFactor = scoreAttributionFactors(data)[0];
   const issue = describeMainIssue(data.orderVsAov.mainIssue);
+  const top = data.factorContributions?.[0];
+  if (top && top.contribution !== 0) {
+    const sign = top.contribution > 0 ? "+" : "";
+    return `主要问题判断为 ${issue}。当前最高影响因子为${
+      top.label || top.factor
+    }（${sign}${formatMoney(
+      top.contribution
+    )}，${top.evidence}，置信度${confidenceLabel(top.confidence)}）。`;
+  }
+  const topFactor = scoreAttributionFactors(data)[0];
   return `主要问题判断为 ${issue}。当前最高影响因素为${topFactor.factor}：${topFactor.reason}。`;
+}
+
+function formatMoney(value: number): string {
+  return value.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+
+function confidenceLabel(
+  confidence: AttributionFactorContribution["confidence"]
+): string {
+  return confidence === "high" ? "高" : confidence === "medium" ? "中" : "低";
 }

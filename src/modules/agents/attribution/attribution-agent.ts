@@ -1,7 +1,15 @@
 import { ATTRIBUTION_SYSTEM_PROMPT } from "@/modules/agents/prompts/attribution-system-prompt";
 import type { AgentMemory } from "@/modules/agents/shared/agent-memory";
 import type { AgentModel } from "@/modules/agents/shared/agent-model";
-import { serializePromptData } from "@/modules/agents/shared/prompt-utils";
+import {
+  extractJsonObject,
+  serializePromptData,
+} from "@/modules/agents/shared/prompt-utils";
+import { localizeFactorName } from "@/modules/attribution/attribution-labels";
+import {
+  NOOP_CHAT_STREAM,
+  type ChatStreamCallbacks,
+} from "@/modules/chat/chat-stream";
 import type {
   AttributionKnowledgeDocument,
   AttributionKnowledgeRetriever,
@@ -12,6 +20,7 @@ export interface AttributionAgentRequest {
   question: string;
   analysisData: Record<string, unknown>;
   fallbackContent: string;
+  stream?: ChatStreamCallbacks;
 }
 
 export interface AttributionAgent {
@@ -36,6 +45,9 @@ export function createAttributionAgent({
         request
       );
       const prompt = buildAttributionPrompt(request, documents);
+      const stream = request.stream || NOOP_CHAT_STREAM;
+      stream.emitStatus("reasoning");
+      let answered = false;
       const content = await model.complete({
         systemPrompt: ATTRIBUTION_SYSTEM_PROMPT,
         messages: [
@@ -43,8 +55,18 @@ export function createAttributionAgent({
           { role: "user", content: prompt },
         ],
         temperature: 0.15,
+        onReasoning: (delta) => stream.emitReasoning(delta),
+        onToken: () => {
+          if (!answered) {
+            answered = true;
+            stream.emitStatus("answering");
+          }
+        },
       });
-      const result = content || request.fallbackContent;
+      // 优先解析结构化 JSON；解析失败则原样返回模型文本（兼容旧行为）
+      const result = content
+        ? renderModelOutput(content)
+        : request.fallbackContent;
 
       memory.remember(
         request.sessionId,
@@ -54,6 +76,88 @@ export function createAttributionAgent({
       return result;
     },
   };
+}
+
+function renderModelOutput(content: string): string {
+  const parsed = extractJsonObject(content);
+  if (!parsed) return content;
+  const structured = renderStructuredAttribution(parsed);
+  return structured || content;
+}
+
+/**
+ * 把归因数据中机器可读的因子名替换为中文标签，再交给模型，
+ * 避免回答里夹杂英文因子 ID。
+ */
+function toLocalizedAnalysisData(
+  data: Record<string, unknown>
+): Record<string, unknown> {
+  const factors = Array.isArray(data.factorContributions)
+    ? data.factorContributions.map((item) => {
+        const factor = item as Record<string, unknown>;
+        return {
+          ...factor,
+          factor:
+            typeof factor.label === "string" ? factor.label : factor.factor,
+        };
+      })
+    : data.factorContributions;
+  return { ...data, factorContributions: factors };
+}
+
+function renderStructuredAttribution(
+  parsed: Record<string, unknown>
+): string | null {
+  if (typeof parsed.mainIssue !== "string" || !Array.isArray(parsed.factors)) {
+    return null;
+  }
+  const summary =
+    typeof parsed.summary === "string" && parsed.summary.trim()
+      ? parsed.summary
+      : `主要问题：${parsed.mainIssue}`;
+  const factors = parsed.factors
+    .filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === "object" && item !== null
+    )
+    .slice(0, 5);
+  const actions = Array.isArray(parsed.actions)
+    ? parsed.actions.filter((item): item is string => typeof item === "string")
+    : [];
+  const metrics = Array.isArray(parsed.validationMetrics)
+    ? parsed.validationMetrics.filter(
+        (item): item is string => typeof item === "string"
+      )
+    : [];
+
+  const lines = ["### 归因结论", summary];
+  if (factors.length > 0) {
+    lines.push("", "### 影响因子");
+    for (const factor of factors) {
+      const name =
+        typeof factor.factor === "string"
+          ? localizeFactorName(factor.factor)
+          : "未知因子";
+      const contribution =
+        typeof factor.contribution === "number" ? factor.contribution : 0;
+      const evidence = typeof factor.evidence === "string" ? factor.evidence : "";
+      lines.push(
+        `- **${name}**：${contribution > 0 ? "+" : ""}${contribution.toLocaleString(
+          "zh-CN",
+          { maximumFractionDigits: 2 }
+        )}（${evidence}）`
+      );
+    }
+  }
+  if (actions.length > 0) {
+    lines.push("", "### 经营建议");
+    actions.forEach((action, index) => lines.push(`${index + 1}. ${action}`));
+  }
+  if (metrics.length > 0) {
+    lines.push("", "### 验证指标");
+    metrics.forEach((metric) => lines.push(`- ${metric}`));
+  }
+  return lines.join("\n");
 }
 
 async function retrieveKnowledgeSafely(
@@ -83,7 +187,7 @@ function buildAttributionPrompt(
     request.question,
     "",
     "## 计算模块结果",
-    serializePromptData(request.analysisData),
+    serializePromptData(toLocalizedAnalysisData(request.analysisData)),
     "",
     "## 本地归因摘要",
     request.fallbackContent,

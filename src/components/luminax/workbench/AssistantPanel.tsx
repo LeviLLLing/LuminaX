@@ -14,6 +14,7 @@ interface AssistantPanelProps {
   messages: ChatMessage[];
   inputValue: string;
   isStreaming: boolean;
+  status?: string | null;
   suggestions: string[];
   chatAreaRef: RefObject<HTMLDivElement | null>;
   onInputChange(value: string): void;
@@ -24,6 +25,7 @@ export function AssistantPanel({
   messages,
   inputValue,
   isStreaming,
+  status,
   suggestions,
   chatAreaRef,
   onInputChange,
@@ -77,6 +79,12 @@ export function AssistantPanel({
         {messages.map((message, index) => (
           <Message key={index} message={message} />
         ))}
+        {isStreaming && status && (
+          <div className="flex items-center gap-2 text-xs text-[#666a73]">
+            <span className="size-1.5 animate-pulse rounded-full bg-[#FFE600]" />
+            {status}
+          </div>
+        )}
       </div>
 
       <form
