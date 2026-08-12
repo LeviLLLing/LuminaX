@@ -17,7 +17,7 @@ const attentionItemSchema = z.object({
 });
 
 const insightSchema = z.object({
-  trendSummary: z.array(z.string().trim().min(1)).min(1),
+  trendSummary: z.array(z.string().trim().min(1)).min(4),
   attentionItems: z.array(attentionItemSchema).min(1),
 });
 
@@ -62,17 +62,22 @@ function toPromptPayload(data: WeeklyReportData) {
     achievementRate: data.achievementRate,
     totalOrders: data.totalOrders,
     avgAOV: data.avgAOV,
+    totalRefund: data.totalRefund,
     refundRate: data.refundRate,
+    totalCancel: data.totalCancel,
+    totalPromo: data.totalPromo,
     promoRate: data.promoRate,
     dateLabels: data.dateLabels,
     salesTrend: data.salesTrend,
     targetTrend: data.targetTrend,
     orderTrend: data.orderTrend,
     aovTrend: data.aovTrend,
+    channelSeries: data.channelSeries,
     storeRanking: data.storeRanking,
     channelBreakdown: data.channelBreakdown,
     categoryBreakdown: data.categoryBreakdown,
     daypartBreakdown: data.daypartBreakdown,
+    refundReasons: data.refundReasons,
     anomalies: data.anomalies,
     weekendAvg: data.weekendAvg,
     weekdayAvg: data.weekdayAvg,
@@ -91,10 +96,7 @@ function buildFallbackInsights(data: WeeklyReportData): ReportInsights {
       severity: alert.tone === "danger" ? "high" : "positive",
       title: alert.title,
       evidence: alert.message,
-      action:
-        alert.tone === "danger"
-          ? "请结合门店现场情况制定跟进动作。"
-          : "保持当前运营节奏并持续观察关键指标。",
+      action: alert.message,
     })),
     source: "fallback",
   };
