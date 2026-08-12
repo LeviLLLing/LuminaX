@@ -20,6 +20,25 @@ export interface WeeklyReportBreakdownItem {
   pct: number;
 }
 
+export type ReportAttentionSeverity =
+  | "high"
+  | "medium"
+  | "low"
+  | "positive";
+
+export interface ReportAttentionItem {
+  severity: ReportAttentionSeverity;
+  title: string;
+  evidence: string;
+  action: string;
+}
+
+export interface ReportInsights {
+  trendSummary: string[];
+  attentionItems: ReportAttentionItem[];
+  source: "ai" | "fallback";
+}
+
 export interface WeeklyReportData {
   startDate: string;
   endDate: string;
