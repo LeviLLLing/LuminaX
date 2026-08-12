@@ -12,6 +12,9 @@ import type { ChatApplication } from "../../src/modules/chat/chat-application";
 import { ChatApplicationError } from "../../src/modules/chat/chat-application";
 import { handleChatHttpRequest } from "../../src/modules/chat/chat-http-adapter";
 import { streamChatResponse } from "../../src/modules/chat/sse-response";
+import { DataAccessDeniedError } from "../../src/modules/admin/permissions/access-control";
+import { createPostWeeklyReportHandler } from "../../src/app/api/reports/weekly/route";
+import type { AuthenticatedUser } from "../../src/modules/auth/auth-types";
 
 test("public chat SSE wire format remains stable", async () => {
   const response = streamChatResponse(
@@ -152,6 +155,82 @@ test("authentication cookie contract remains stable", async (context) => {
       secure,
     });
   }
+});
+
+test("weekly report API enforces authentication, payload and permission contracts", async () => {
+  const user: AuthenticatedUser = {
+    id: "manager-one",
+    username: "manager.one",
+    displayName: "Manager One",
+    role: "manager",
+  };
+  const validRequest = () =>
+    new NextRequest("http://localhost/api/reports/weekly", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        startDate: "2025-05-01",
+        endDate: "2025-05-14",
+        storeIds: ["S001"],
+      }),
+    });
+
+  const unauthenticated = await createPostWeeklyReportHandler({
+    async authenticate() {
+      return null;
+    },
+    async generate() {
+      throw new Error("must not run");
+    },
+  })(validRequest());
+  assert.equal(unauthenticated.status, 401);
+
+  const malformed = await createPostWeeklyReportHandler({
+    async authenticate() {
+      return user;
+    },
+    async generate() {
+      throw new Error("must not run");
+    },
+  })(
+    new NextRequest("http://localhost/api/reports/weekly", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ startDate: "bad", endDate: "2025-05-14" }),
+    })
+  );
+  assert.equal(malformed.status, 400);
+
+  const denied = await createPostWeeklyReportHandler({
+    async authenticate() {
+      return user;
+    },
+    async generate() {
+      throw new DataAccessDeniedError("denied");
+    },
+  })(validRequest());
+  assert.equal(denied.status, 403);
+  assert.deepEqual(await denied.json(), { error: "denied" });
+
+  const allowed = await createPostWeeklyReportHandler({
+    async authenticate() {
+      return user;
+    },
+    async generate(input) {
+      assert.deepEqual(input, {
+        userId: "manager-one",
+        startDate: "2025-05-01",
+        endDate: "2025-05-14",
+        storeIds: ["S001"],
+      });
+      return "<!DOCTYPE html><p>report</p>";
+    },
+  })(validRequest());
+  assert.equal(allowed.status, 200);
+  assert.deepEqual(await allowed.json(), {
+    html: "<!DOCTYPE html><p>report</p>",
+  });
+  assert.equal(allowed.headers.get("Cache-Control"), "no-store");
 });
 
 function assertCookie(

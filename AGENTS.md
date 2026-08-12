@@ -39,6 +39,7 @@
 
 ### Reports and visualization
 - `src/modules/reports/report-engine.ts` exposes `generateWeeklyReportSummary` and `generateWeeklyReportHTML`; the stable report model is `WeeklyReportData` in `src/modules/reports/report-model.ts`.
+- `POST /api/reports/weekly` generates report HTML on the server. DeepSeek may rewrite only the trend summary and attention sections from aggregate `WeeklyReportData`; SQL-derived values remain authoritative and invalid or unavailable model output silently falls back to deterministic report copy.
 - `src/modules/reports/sql-report-formatter.ts` formats SQL-backed report results. Dashboard chart options are built by `buildDashboardChartOptions` in `src/modules/visualization/chart-options.ts` for the ECharts UI.
 
 ### Runtime repositories

@@ -107,7 +107,48 @@ export const FIXED_METRIC_ACCESS_REQUIREMENTS: Record<
     feedback,
     promotion,
   ],
-  report: [master, sales, target, refund, promotion, channel, category, daypart],
+  report: [
+    requirement("store_master", [
+      "store_id",
+      "store_name",
+      "region",
+      "city",
+      "store_type",
+    ]),
+    requirement("store_sales_daily", [
+      "store_id",
+      "date",
+      "actual_sales",
+      "order_count",
+      "customer_count",
+      "avg_order_value",
+      "refund_amount",
+      "cancelled_orders",
+    ]),
+    requirement("sales_target_daily", [
+      "store_id",
+      "date",
+      "sales_target",
+      "order_target",
+      "aov_target",
+    ]),
+    requirement("refund_cancel_daily", [
+      "store_id",
+      "date",
+      "refund_amount",
+      "cancelled_orders",
+      "main_reason",
+    ]),
+    requirement("promotion_daily", [
+      "store_id",
+      "date",
+      "promo_sales",
+      "promo_orders",
+    ]),
+    channel,
+    category,
+    daypart,
+  ],
 };
 
 export function getCustomMetricAccessRequirements(
@@ -211,4 +252,3 @@ function collectCteNames(select: Select, names = new Set<string>()): Set<string>
   if (select._next) collectCteNames(select._next, names);
   return names;
 }
-
