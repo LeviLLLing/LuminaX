@@ -49,6 +49,7 @@ export function createLatestInsightStateController(
     generationStatus: "idle",
   };
   let reloadSequence = 0;
+  let snapshotRevision = 0;
   const actionSequences = new Map<string, number>();
   const listeners = new Set<(state: LatestInsightState) => void>();
 
@@ -63,16 +64,17 @@ export function createLatestInsightStateController(
     try {
       const insight = await dependencies.fetchLatest();
       if (sequence === reloadSequence) {
+        snapshotRevision += 1;
         setState({ insight, error: null });
       }
       return insight;
     } catch (error) {
       if (sequence === reloadSequence) {
+        const authorizationFailed = isAuthorizationError(error);
+        if (authorizationFailed) snapshotRevision += 1;
         setState({
           error: messageOf(error),
-          ...(error instanceof InsightClientError && [401, 403].includes(error.status)
-            ? { insight: null }
-            : {}),
+          ...(authorizationFailed ? { insight: null } : {}),
         });
       }
       throw error;
@@ -121,6 +123,10 @@ export function createLatestInsightStateController(
   ): Promise<void> => {
     const previous = state.insight;
     if (!previous) return;
+    const previousAction = previous.actions.find((action) => action.id === actionId);
+    if (!previousAction) return;
+    const sourceInsightId = previous.id;
+    const sourceSnapshotRevision = snapshotRevision;
     const sequence = (actionSequences.get(actionId) ?? 0) + 1;
     actionSequences.set(actionId, sequence);
     setState({
@@ -140,14 +146,46 @@ export function createLatestInsightStateController(
     });
     try {
       const insight = await dependencies.updateAction({
-        insightId: previous.id,
+        insightId: sourceInsightId,
         actionId,
         completed,
       });
-      if (actionSequences.get(actionId) === sequence) setState({ insight });
+      if (!isCurrentActionRequest()) return;
+      if (insight.id !== sourceInsightId) return;
+      const acknowledgedAction = insight.actions.find(
+        (action) => action.id === actionId
+      );
+      if (!acknowledgedAction) {
+        throw new InsightClientError(500, "Insight action response is invalid");
+      }
+      const current = state.insight;
+      if (!current) return;
+      setState({
+        insight: {
+          ...current,
+          actions: current.actions.map((action) =>
+            action.id === actionId ? acknowledgedAction : action
+          ),
+        },
+      });
     } catch (error) {
-      if (actionSequences.get(actionId) !== sequence) return;
-      setState({ insight: previous, error: messageOf(error) });
+      if (isAuthorizationError(error) && isSourceSnapshotCurrent()) {
+        snapshotRevision += 1;
+        setState({ insight: null, error: messageOf(error), isLoading: false });
+        return;
+      }
+      if (!isCurrentActionRequest()) return;
+      const current = state.insight;
+      if (!current) return;
+      setState({
+        insight: {
+          ...current,
+          actions: current.actions.map((action) =>
+            action.id === actionId ? previousAction : action
+          ),
+        },
+        error: messageOf(error),
+      });
       if (error instanceof InsightClientError && error.status === 409) {
         try {
           await reload();
@@ -155,6 +193,20 @@ export function createLatestInsightStateController(
           // Rollback remains visible when refreshing the latest snapshot fails.
         }
       }
+    }
+
+    function isCurrentActionRequest(): boolean {
+      return (
+        isSourceSnapshotCurrent() &&
+        actionSequences.get(actionId) === sequence
+      );
+    }
+
+    function isSourceSnapshotCurrent(): boolean {
+      return (
+        state.insight?.id === sourceInsightId &&
+        snapshotRevision === sourceSnapshotRevision
+      );
     }
   };
 
@@ -198,4 +250,8 @@ export function useLatestInsight(): UseLatestInsightResult {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : "Latest insight unavailable";
+}
+
+function isAuthorizationError(error: unknown): error is InsightClientError {
+  return error instanceof InsightClientError && [401, 403].includes(error.status);
 }

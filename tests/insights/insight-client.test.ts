@@ -344,6 +344,138 @@ test("a stale action response cannot overwrite the latest toggle", async () => {
   assert.equal(controller.getState().insight?.actions[0].completed, false);
 });
 
+test("action authorization failures immediately hide the protected snapshot", async () => {
+  for (const status of [401, 403]) {
+    const pending = deferred<InsightSnapshotDto>();
+    const controller = createLatestInsightStateController({
+      fetchLatest: async () => insight,
+      updateAction: () => pending.promise,
+      now: () => "2026-08-13T01:00:00.000Z",
+    });
+    await controller.reload();
+
+    const update = controller.toggleAction("a1", true);
+    assert.equal(controller.getState().insight?.actions[0].completed, true);
+    pending.reject(new InsightClientError(status, "洞察权限已失效"));
+    await update;
+
+    assert.equal(controller.getState().insight, null);
+    assert.equal(controller.getState().error, "洞察权限已失效");
+  }
+});
+
+test("an older same-action authorization failure still hides its current snapshot", async () => {
+  const first = deferred<InsightSnapshotDto>();
+  const second = deferred<InsightSnapshotDto>();
+  let updateCount = 0;
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => insight,
+    updateAction: () => (updateCount++ === 0 ? first.promise : second.promise),
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  await controller.reload();
+
+  const olderUpdate = controller.toggleAction("a1", true);
+  const newerUpdate = controller.toggleAction("a1", false);
+  first.reject(new InsightClientError(403, "洞察权限已失效"));
+  await olderUpdate;
+
+  assert.equal(controller.getState().insight, null);
+  assert.equal(controller.getState().error, "洞察权限已失效");
+  second.resolve(insight);
+  await newerUpdate;
+  assert.equal(controller.getState().insight, null);
+});
+
+test("a newer SSE snapshot invalidates old action successes and failures", async () => {
+  const first = deferred<InsightSnapshotDto>();
+  const second = deferred<InsightSnapshotDto>();
+  const nextInsight = {
+    ...twoActionInsight(),
+    id: "i2",
+    headline: "New snapshot",
+    updatedAt: "2026-08-13T02:00:00.000Z",
+  };
+  let fetchResult = twoActionInsight();
+  let updateCount = 0;
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => fetchResult,
+    updateAction: () => (updateCount++ === 0 ? first.promise : second.promise),
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  await controller.reload();
+
+  const oldSuccess = controller.toggleAction("a1", true);
+  const oldFailure = controller.toggleAction("a2", true);
+  fetchResult = nextInsight;
+  await controller.handleStreamEvent({
+    status: "updated",
+    insightId: "i2",
+    findingCount: 1,
+    actionCount: 2,
+  });
+
+  first.resolve(actionResponse(twoActionInsight(), "a1", true));
+  second.reject(new InsightClientError(403, "old permission failure"));
+  await Promise.all([oldSuccess, oldFailure]);
+
+  assert.equal(controller.getState().insight?.id, "i2");
+  assert.equal(controller.getState().insight?.headline, "New snapshot");
+  assert.equal(controller.getState().error, null);
+  assert.equal(controller.getState().generationStatus, "idle");
+});
+
+test("a newer reload snapshot invalidates an old action authorization failure", async () => {
+  const action = deferred<InsightSnapshotDto>();
+  const nextInsight = {
+    ...twoActionInsight(),
+    headline: "Reloaded snapshot",
+    updatedAt: "2026-08-13T02:00:00.000Z",
+  };
+  let fetchResult = twoActionInsight();
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => fetchResult,
+    updateAction: () => action.promise,
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  await controller.reload();
+
+  const oldUpdate = controller.toggleAction("a1", true);
+  fetchResult = nextInsight;
+  await controller.reload();
+  action.reject(new InsightClientError(401, "old session failure"));
+  await oldUpdate;
+
+  assert.equal(controller.getState().insight?.id, "i1");
+  assert.equal(controller.getState().insight?.headline, "Reloaded snapshot");
+  assert.equal(controller.getState().error, null);
+});
+
+test("out-of-order action snapshots merge only their acknowledged fields", async () => {
+  const first = deferred<InsightSnapshotDto>();
+  const second = deferred<InsightSnapshotDto>();
+  let updateCount = 0;
+  const initial = twoActionInsight();
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => initial,
+    updateAction: () => (updateCount++ === 0 ? first.promise : second.promise),
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  await controller.reload();
+
+  const updateFirst = controller.toggleAction("a1", true);
+  const updateSecond = controller.toggleAction("a2", true);
+  second.resolve(actionResponse(initial, "a2", true));
+  await updateSecond;
+  first.resolve(actionResponse(initial, "a1", true));
+  await updateFirst;
+
+  assert.deepEqual(
+    controller.getState().insight?.actions.map((action) => [action.id, action.completed]),
+    [["a1", true], ["a2", true]]
+  );
+});
+
 interface ChartOption {
   xAxis?: unknown;
   yAxis?: unknown;
@@ -356,4 +488,53 @@ interface ChartOption {
 function callFormatter(formatter: unknown, value: number | [number, string]): string {
   assert.equal(typeof formatter, "function");
   return (formatter as (params: { value: number | [number, string] }) => string)({ value });
+}
+
+function twoActionInsight(): InsightSnapshotDto {
+  return {
+    ...structuredClone(insight),
+    actions: [
+      structuredClone(insight.actions[0]),
+      {
+        id: "a2",
+        priority: "P1",
+        title: "Check staffing",
+        ownerRole: "店长",
+        verificationMetricCode: "orders",
+        verificationMetricLabel: "Orders",
+        completed: false,
+        completedAt: null,
+      },
+    ],
+  };
+}
+
+function actionResponse(
+  snapshot: InsightSnapshotDto,
+  actionId: string,
+  completed: boolean
+): InsightSnapshotDto {
+  return {
+    ...structuredClone(snapshot),
+    actions: snapshot.actions.map((action) =>
+      action.id === actionId
+        ? {
+            ...action,
+            completed,
+            completedAt: completed ? "2026-08-13T01:00:00.000Z" : null,
+          }
+        : structuredClone(action)
+    ),
+    updatedAt: "2026-08-13T01:00:00.000Z",
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
