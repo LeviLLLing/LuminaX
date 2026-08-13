@@ -41,7 +41,13 @@ export function createPatchInsightActionHandler({
     request: NextRequest,
     context: RouteContext
   ): Promise<Response> {
-    const user = await authenticate(request);
+    let user: AuthenticatedUser | null;
+    try {
+      user = await authenticate(request);
+    } catch (error) {
+      console.error("Failed to authenticate insight action:", errorName(error));
+      return mappedError(500, "Insight action update failed");
+    }
     if (!user) return withoutCaching(unauthenticatedResponse());
 
     let payload: unknown;

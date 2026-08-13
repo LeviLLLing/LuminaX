@@ -49,6 +49,26 @@ test("latest insight GET requires login and disables caching", async () => {
   assert.deepEqual(await empty.json(), { insight: null });
 });
 
+test("latest insight GET safely maps authentication failures", async (context) => {
+  const logs: unknown[][] = [];
+  context.mock.method(console, "error", (...args: unknown[]) => {
+    logs.push(args);
+  });
+  const authenticationError = new Error("private authentication detail");
+  authenticationError.name = "AuthenticationStoreError";
+
+  const response = await createGetLatestInsightHandler({
+    authenticate: async () => { throw authenticationError; },
+    getLatest: async () => { throw new Error("must not run"); },
+  })(new NextRequest("http://localhost/api/insights/latest"));
+
+  assert.equal(response.status, 500);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await response.json(), { error: "Latest insight unavailable" });
+  assert.match(JSON.stringify(logs), /AuthenticationStoreError/);
+  assert.doesNotMatch(JSON.stringify(logs), /private authentication detail/);
+});
+
 test("latest insight GET maps authorization and repository errors safely", async (context) => {
   context.mock.method(console, "error", () => undefined);
   const cases = [
@@ -118,6 +138,28 @@ test("action PATCH requires authentication before mutation", async () => {
   });
   assert.equal(response.status, 401);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
+});
+
+test("action PATCH safely maps authentication failures", async (context) => {
+  const logs: unknown[][] = [];
+  context.mock.method(console, "error", (...args: unknown[]) => {
+    logs.push(args);
+  });
+  const authenticationError = new Error("private session repository detail");
+  authenticationError.name = "SessionRepositoryError";
+
+  const response = await createPatchInsightActionHandler({
+    authenticate: async () => { throw authenticationError; },
+    updateAction: async () => { throw new Error("must not run"); },
+  })(createPatchRequest({ insightId: "insight-1", completed: true }), {
+    params: Promise.resolve({ actionId: "action-1" }),
+  });
+
+  assert.equal(response.status, 500);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await response.json(), { error: "Insight action update failed" });
+  assert.match(JSON.stringify(logs), /SessionRepositoryError/);
+  assert.doesNotMatch(JSON.stringify(logs), /private session repository detail/);
 });
 
 test("action PATCH maps domain and unknown failures without leaking internals", async (context) => {

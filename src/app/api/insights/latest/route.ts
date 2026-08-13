@@ -20,7 +20,15 @@ export function createGetLatestInsightHandler({
   getLatest,
 }: GetLatestInsightRouteDependencies) {
   return async function getLatestInsight(request: NextRequest): Promise<Response> {
-    const user = await authenticate(request);
+    let user: AuthenticatedUser | null;
+    try {
+      user = await authenticate(request);
+    } catch (error) {
+      console.error("Failed to authenticate latest insight:", errorName(error));
+      return withoutCaching(
+        Response.json({ error: "Latest insight unavailable" }, { status: 500 })
+      );
+    }
     if (!user) return withoutCaching(unauthenticatedResponse());
 
     try {
