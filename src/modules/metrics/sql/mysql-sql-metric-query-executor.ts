@@ -169,12 +169,12 @@ interface CompareSummaryRow extends RowDataPacket {
   storeName: string;
   totalSales: number;
   totalTarget: number;
-  achievementRate: string;
+  achievementRate: number;
   totalOrders: number;
   avgOrderValue: number;
   totalRefund: number;
   totalCancelled: number;
-  refundRate: string;
+  refundRate: number;
 }
 
 interface CompareDailyRow extends RowDataPacket {

@@ -38,6 +38,8 @@ export function materializeInsightSnapshot(input: MaterializeInsightSnapshotInpu
   }
   const sourceIds = draft.findings.map((finding) => finding.sourceId);
   if (new Set(sourceIds).size !== sourceIds.length) throw new InsightValidationError("DUPLICATE_FINDING_SOURCE");
+  assertUniqueCatalogIds(catalog.findingSources.map((source) => source.id), "DUPLICATE_SOURCE_ID");
+  assertUniqueCatalogIds(catalog.evidenceCandidates.map((candidate) => candidate.id), "DUPLICATE_EVIDENCE_ID");
 
   const uuid = input.randomUUID || createRandomUUID;
   const now = (input.now || (() => new Date()))().toISOString();
@@ -59,6 +61,14 @@ export function materializeInsightSnapshot(input: MaterializeInsightSnapshotInpu
         throw new InsightValidationError("NON_FINITE_EVIDENCE_VALUE");
       }
       if (!source.evidenceCandidateIds.includes(evidenceId)) throw new InsightValidationError("UNSUPPORTED_EVIDENCE_REFERENCE");
+      if (
+        candidate.unit !== source.unit ||
+        !candidate.series.some(
+          (item) => item.value === source.value || item.baseline === source.value
+        )
+      ) {
+        throw new InsightValidationError("UNSUPPORTED_EVIDENCE_FACT");
+      }
       evidenceReferences.add(evidenceId);
     }
     const id = uuid();
@@ -111,6 +121,12 @@ export function materializeInsightSnapshot(input: MaterializeInsightSnapshotInpu
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function assertUniqueCatalogIds(ids: string[], code: string): void {
+  if (new Set(ids).size !== ids.length) {
+    throw new InsightValidationError(code);
+  }
 }
 
 function validateDraftProse(draft: InsightDraft): void {

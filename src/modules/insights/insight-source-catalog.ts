@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { AnalysisIntent } from "@/modules/domain/analysis-types";
 import type {
   InsightEvidenceSeries,
@@ -181,6 +182,7 @@ class CatalogBuilder {
 function buildOrderTrend(builder: CatalogBuilder, data: UnknownRecord): void {
   for (const store of records(data.stores)) {
     const subject = subjectOf(store, "storeId", "storeName");
+    if (!subject) continue;
     const period = builder.evidence(`stores.${subject.id}.orders`, "period_variance", `${subject.label}订单目标差异`, "count", "订单目标", [series(subject.label, store.totalOrders, store.totalOrderTarget)]);
     const drivers = builder.evidence(`stores.${subject.id}.trend`, "metric_drivers", `${subject.label}订单表现`, "percentage", "订单比率", [series("订单达成率", store.orderAchievementRate), series("趋势变化", store.trendPct)]);
     builder.source("stores.totalOrders", "total_orders", `${subject.label}订单量`, store.totalOrders, "count", [subject.id], [period]);
@@ -192,6 +194,7 @@ function buildOrderTrend(builder: CatalogBuilder, data: UnknownRecord): void {
 function buildAovTrend(builder: CatalogBuilder, data: UnknownRecord): void {
   for (const store of records(data.stores)) {
     const subject = subjectOf(store, "storeId", "storeName");
+    if (!subject) continue;
     const period = builder.evidence(`stores.${subject.id}.aov`, "period_variance", `${subject.label}客单价目标差异`, "currency", "目标客单价", [series(subject.label, store.avgAOV, store.targetAOV)]);
     const drivers = builder.evidence(`stores.${subject.id}.aov-drivers`, "metric_drivers", `${subject.label}客单价差额`, "currency", "客单价差额", [series("客单价差额", store.aovGap)]);
     const trend = builder.evidence(`stores.${subject.id}.aov-trend`, "metric_drivers", `${subject.label}客单价趋势`, "percentage", "趋势变化", [series("趋势变化", store.trendPct)]);
@@ -208,59 +211,74 @@ function buildMix(builder: CatalogBuilder, data: UnknownRecord, dimension: "chan
   const storeKey = dimension === "channel" ? "channels" : "dayparts";
   const type = dimension === "channel" ? "channel_contribution" : "daypart_contribution";
   const unitLabel = dimension === "channel" ? "渠道" : "时段";
-  const overall = records(data[overallKey]);
-  const stores = records(data.byStore);
-  const shareEvidence = builder.evidence(overallKey, type, `${unitLabel}销售占比`, "percentage", "销售占比", overall.map((item) => series(textValue(item[nameKey], unitLabel), item.salesPct)));
+  const overall = records(data[overallKey]).flatMap((item) => {
+    const name = textValue(item[nameKey]);
+    return name ? [{ item, name }] : [];
+  });
+  const stores = records(data.byStore).flatMap((store) => {
+    const subject = subjectOf(store, "storeId", "storeName");
+    return subject ? [{ store, subject }] : [];
+  });
+  const shareEvidence = builder.evidence(overallKey, type, `${unitLabel}销售占比`, "percentage", "销售占比", overall.map(({ item, name }) => series(name, item.salesPct)));
   const valueEvidence = builder.evidence(`byStore.${storeKey}`, type, `${unitLabel}门店销售贡献`, "currency", "销售额", stores.flatMap((store) => {
-      const subject = subjectOf(store, "storeId", "storeName");
-      return records(store[storeKey]).map((item) => series(`${subject.label}-${textValue(item[nameKey], unitLabel)}`, item.sales));
+      return records(store.store[storeKey]).map((item) => {
+        const name = textValue(item[nameKey]);
+        return name ? series(`${store.subject.label}-${name}`, item.sales) : null;
+      });
     }));
-  for (const item of overall) {
-    const name = textValue(item[nameKey], unitLabel);
+  for (const { item, name } of overall) {
     builder.source(`${overallKey}.salesPct`, `${dimension}_pct`, `${name}销售占比`, item.salesPct, "percentage", [name], [shareEvidence]);
   }
-  for (const store of stores) {
-    const subject = subjectOf(store, "storeId", "storeName");
+  for (const { store, subject } of stores) {
     for (const item of records(store[storeKey])) {
-      const name = textValue(item[nameKey], unitLabel);
+      const name = textValue(item[nameKey]);
+      if (!name) continue;
       builder.source(`byStore.${storeKey}.sales`, `${dimension}_value`, `${subject.label}${name}销售额`, item.sales, "currency", [subject.id, name], [valueEvidence]);
     }
   }
 }
 
 function buildPromotion(builder: CatalogBuilder, data: UnknownRecord): void {
-  const details = records(data.promotionDetails);
+  const details = records(data.promotionDetails).flatMap((item) => {
+    const name = textValue(item.promotionName);
+    return name ? [{ item, name }] : [];
+  });
   const rateDriver = builder.evidence("contributionRate", "metric_drivers", "促销贡献率", "percentage", "促销贡献率", [series("促销贡献率", data.contributionRate)]);
-  const discountDriver = builder.evidence("promotionDetails", "metric_drivers", "促销优惠驱动", "currency", "优惠金额", [series("总优惠", data.totalDiscount), ...details.map((item) => series(textValue(item.promotionName, "促销"), item.discountAmount))]);
-  const stores = records(data.byStore);
-  const rateVariance = builder.evidence("byStore.contributionRate", "store_target_variance", "门店促销贡献差异", "percentage", "促销贡献率", stores.map((store) => series(subjectOf(store, "storeId", "storeName").label, store.contributionRate)));
-  const discountVariance = builder.evidence("byStore.totalDiscount", "store_target_variance", "门店优惠金额差异", "currency", "优惠金额", stores.map((store) => series(subjectOf(store, "storeId", "storeName").label, store.totalDiscount)));
+  const discountDriver = builder.evidence("promotionDetails", "metric_drivers", "促销优惠驱动", "currency", "优惠金额", [series("总优惠", data.totalDiscount), ...details.map(({ item, name }) => series(name, item.discountAmount))]);
+  const stores = records(data.byStore).flatMap((store) => {
+    const subject = subjectOf(store, "storeId", "storeName");
+    return subject ? [{ store, subject }] : [];
+  });
+  const rateVariance = builder.evidence("byStore.contributionRate", "store_target_variance", "门店促销贡献差异", "percentage", "促销贡献率", stores.map(({ store, subject }) => series(subject.label, store.contributionRate)));
+  const discountVariance = builder.evidence("byStore.totalDiscount", "store_target_variance", "门店优惠金额差异", "currency", "优惠金额", stores.map(({ store, subject }) => series(subject.label, store.totalDiscount)));
   builder.source("contributionRate", "contribution_rate", "促销贡献率", data.contributionRate, "percentage", [], [rateDriver]);
   builder.source("totalDiscount", "total_discount", "促销优惠总额", data.totalDiscount, "currency", [], [discountDriver]);
-  for (const detail of details) {
-    const name = textValue(detail.promotionName, "促销");
-    builder.source("promotionDetails.discountAmount", "promotion_value", `${name}优惠金额`, detail.discountAmount, "currency", [name], [discountDriver]);
+  for (const { item, name } of details) {
+    builder.source("promotionDetails.discountAmount", "promotion_value", `${name}优惠金额`, item.discountAmount, "currency", [name], [discountDriver]);
   }
-  for (const store of stores) {
-    const subject = subjectOf(store, "storeId", "storeName");
+  for (const { store, subject } of stores) {
     builder.source("byStore.contributionRate", "store_contribution_rate", `${subject.label}促销贡献率`, store.contributionRate, "percentage", [subject.id], [rateVariance]);
     builder.source("byStore.totalDiscount", "total_discount", `${subject.label}优惠金额`, store.totalDiscount, "currency", [subject.id], [discountVariance]);
   }
 }
 
 function buildRefund(builder: CatalogBuilder, data: UnknownRecord): void {
-  const stores = records(data.byStore);
-  const drivers = builder.evidence("refund-summary", "metric_drivers", "退款取消驱动", "percentage", "整体比率", [series("退款率", data.refundRate), series("取消率", data.cancelRate), ...stores.flatMap((store) => {
+  const stores = records(data.byStore).flatMap((store) => {
     const subject = subjectOf(store, "storeId", "storeName");
+    return subject ? [{ store, subject }] : [];
+  });
+  const drivers = builder.evidence("refund-summary", "metric_drivers", "退款取消驱动", "percentage", "整体比率", [series("退款率", data.refundRate), series("取消率", data.cancelRate), ...stores.flatMap(({ store, subject }) => {
     return [series(`${subject.label}退款率`, store.refundRate), series(`${subject.label}取消率`, store.cancelRate)];
   })]);
-  const daily = records(data.dailyRefund);
-  const dates = builder.evidence("dailyRefund", "anomaly_dates", "退款异常日期", "percentage", "每日退款率", daily.map((item) => series(textValue(item.date, "日期"), item.refundRate)));
+  const daily = records(data.dailyRefund).flatMap((item) => {
+    const date = textValue(item.date);
+    return date ? [{ item, date }] : [];
+  });
+  const dates = builder.evidence("dailyRefund", "anomaly_dates", "退款异常日期", "percentage", "每日退款率", daily.map(({ item, date }) => series(date, item.refundRate)));
   builder.source("refundRate", "refund_rate", "整体退款率", data.refundRate, "percentage", [], [drivers]);
   builder.source("cancelRate", "cancel_rate", "整体取消率", data.cancelRate, "percentage", [], [drivers]);
-  for (const item of daily) builder.source("dailyRefund.refundRate", "daily_refund_rate", `${textValue(item.date, "日期")}退款率`, item.refundRate, "percentage", [textValue(item.date, "日期")], [dates]);
-  for (const store of stores) {
-    const subject = subjectOf(store, "storeId", "storeName");
+  for (const { item, date } of daily) builder.source("dailyRefund.refundRate", "daily_refund_rate", `${date}退款率`, item.refundRate, "percentage", [date], [dates]);
+  for (const { store, subject } of stores) {
     builder.source("byStore.refundRate", "store_refund_rate", `${subject.label}退款率`, store.refundRate, "percentage", [subject.id], [drivers]);
     builder.source("byStore.cancelRate", "cancel_rate", `${subject.label}取消率`, store.cancelRate, "percentage", [subject.id], [drivers]);
   }
@@ -269,36 +287,43 @@ function buildRefund(builder: CatalogBuilder, data: UnknownRecord): void {
 function buildAnomaly(builder: CatalogBuilder, data: UnknownRecord): void {
   for (const store of records(data.stores)) {
     const subject = subjectOf(store, "storeId", "storeName");
-    const days = records(store.anomalyDays);
-    const dates = builder.evidence(`stores.${subject.id}.anomalyDays`, "anomaly_dates", `${subject.label}异常日期`, "currency", "当日销售目标", days.map((day) => series(textValue(day.date, "日期"), day.actualSales, day.salesTarget)));
-    const drivers = builder.evidence(`stores.${subject.id}.anomalyDrivers`, "metric_drivers", `${subject.label}异常驱动`, "ratio", "标准分", days.map((day) => series(textValue(day.date, "日期"), day.zScore)));
+    if (!subject) continue;
+    const days = records(store.anomalyDays).flatMap((day) => {
+      const date = textValue(day.date);
+      return date ? [{ day, date }] : [];
+    });
+    const dates = builder.evidence(`stores.${subject.id}.anomalyDays`, "anomaly_dates", `${subject.label}异常日期`, "currency", "当日销售目标", days.map(({ day, date }) => series(date, day.actualSales, day.salesTarget)));
+    builder.evidence(`stores.${subject.id}.anomalyDrivers`, "metric_drivers", `${subject.label}异常驱动`, "ratio", "标准分", days.map(({ day, date }) => series(date, day.zScore)));
     const count = builder.evidence(`stores.${subject.id}.anomalyCount`, "metric_drivers", `${subject.label}异常日数量`, "count", "异常日数量", [series("异常日数量", store.anomalyCount)]);
     builder.source("stores.anomalyCount", "anomaly_count", `${subject.label}异常日数量`, store.anomalyCount, "count", [subject.id], [count]);
-    for (const day of days) builder.source("stores.anomalyDays.actualSales", "anomaly_day", `${subject.label}${textValue(day.date, "日期")}销售额`, day.actualSales, "currency", [subject.id, textValue(day.date, "日期")], [dates, drivers]);
+    for (const { day, date } of days) builder.source("stores.anomalyDays.actualSales", "anomaly_day", `${subject.label}${date}销售额`, day.actualSales, "currency", [subject.id, date], [dates]);
   }
 }
 
 function buildCompare(builder: CatalogBuilder, data: UnknownRecord): void {
-  const stores = records(data.stores);
-  const salesVariance = builder.evidence("store-performance", "store_target_variance", "门店目标表现", "currency", "销售目标", stores.map((store) => {
+  const stores = records(data.stores).flatMap((store) => {
     const subject = subjectOf(store, "storeId", "storeName");
-    return series(subject.label, store.totalSales, store.totalTarget);
+    return subject ? [{ store, subject }] : [];
+  });
+  const salesVariance = builder.evidence("store-performance", "store_target_variance", "门店目标表现", "currency", "销售目标", stores.map((store) => {
+    return series(store.subject.label, store.store.totalSales, store.store.totalTarget);
   }));
-  const rateVariance = builder.evidence("store-achievement-rate", "store_target_variance", "门店目标达成率", "percentage", "目标达成率", stores.map((store) => series(subjectOf(store, "storeId", "storeName").label, store.achievementRate)));
-  const orderVariance = builder.evidence("store-orders", "store_target_variance", "门店订单差异", "count", "订单量", stores.map((store) => series(subjectOf(store, "storeId", "storeName").label, store.totalOrders)));
-  const aovVariance = builder.evidence("store-aov", "store_target_variance", "门店客单价差异", "currency", "客单价", stores.map((store) => series(subjectOf(store, "storeId", "storeName").label, store.avgOrderValue)));
-  const refundVariance = builder.evidence("store-refund", "store_target_variance", "门店退款差异", "currency", "退款额", stores.map((store) => series(subjectOf(store, "storeId", "storeName").label, store.totalRefund)));
+  const rateVariance = builder.evidence("store-achievement-rate", "store_target_variance", "门店目标达成率", "percentage", "目标达成率", stores.map(({ store, subject }) => series(subject.label, store.achievementRate)));
+  const orderVariance = builder.evidence("store-orders", "store_target_variance", "门店订单差异", "count", "订单量", stores.map(({ store, subject }) => series(subject.label, store.totalOrders)));
+  const aovVariance = builder.evidence("store-aov", "store_target_variance", "门店客单价差异", "currency", "客单价", stores.map(({ store, subject }) => series(subject.label, store.avgOrderValue)));
+  const refundVariance = builder.evidence("store-refund", "store_target_variance", "门店退款差异", "currency", "退款额", stores.map(({ store, subject }) => series(subject.label, store.totalRefund)));
+  const refundRateVariance = builder.evidence("store-refund-rate", "store_target_variance", "门店退款率差异", "percentage", "退款率", stores.map(({ store, subject }) => series(subject.label, store.refundRate)));
   const channel = contributionEvidence(builder, stores, "channelBreakdown", "channel_contribution", "渠道贡献");
   const category = contributionEvidence(builder, stores, "categoryBreakdown", "category_contribution", "品类贡献");
   const daypart = contributionEvidence(builder, stores, "daypartBreakdown", "daypart_contribution", "时段贡献");
-  for (const store of stores) {
-    const subject = subjectOf(store, "storeId", "storeName");
+  for (const { store, subject } of stores) {
     builder.source("stores.totalSales", "sales", `${subject.label}销售额`, store.totalSales, "currency", [subject.id], [salesVariance]);
     builder.source("stores.totalTarget", "target", `${subject.label}销售目标`, store.totalTarget, "currency", [subject.id], [salesVariance]);
     builder.source("stores.achievementRate", "achievement_rate", `${subject.label}目标达成率`, store.achievementRate, "percentage", [subject.id], [rateVariance]);
     builder.source("stores.totalOrders", "orders", `${subject.label}订单量`, store.totalOrders, "count", [subject.id], [orderVariance]);
     builder.source("stores.avgOrderValue", "aov", `${subject.label}客单价`, store.avgOrderValue, "currency", [subject.id], [aovVariance]);
     builder.source("stores.totalRefund", "refund", `${subject.label}退款额`, store.totalRefund, "currency", [subject.id], [refundVariance]);
+    builder.source("stores.refundRate", "refund_rate", `${subject.label}退款率`, store.refundRate, "percentage", [subject.id], [refundRateVariance]);
     addBreakdownSources(builder, store, subject, "channelBreakdown", "channel_contribution", channel);
     addBreakdownSources(builder, store, subject, "categoryBreakdown", "category_contribution", category);
     addBreakdownSources(builder, store, subject, "daypartBreakdown", "daypart_contribution", daypart);
@@ -318,40 +343,80 @@ function buildAttribution(builder: CatalogBuilder, data: UnknownRecord): void {
   builder.source("salesSummary.avgOrderValue", "sales_summary", "客单价", summary.avgOrderValue, "currency", [], [aovPeriod]);
 
   const decomposition = record(data.decomposition);
-  const factors = records(data.factorContributions);
-  const drivers = builder.evidence("decomposition", "metric_drivers", "归因驱动", "currency", "差异贡献", [series("总差异", decomposition.totalGap), series("订单量差异", decomposition.orderVolumeGap), series("客单价差异", decomposition.aovGap), series("交互项", decomposition.interaction), ...factors.map((factor) => series(textValue(factor.label, "因素"), factor.contribution))]);
+  const factors = records(data.factorContributions).flatMap((factor) => {
+    const id = textValue(factor.factor);
+    const label = textValue(factor.label);
+    return id && label ? [{ factor, id, label }] : [];
+  });
+  const drivers = builder.evidence("decomposition", "metric_drivers", "归因驱动", "currency", "差异贡献", [series("总差异", decomposition.totalGap), series("订单量差异", decomposition.orderVolumeGap), series("客单价差异", decomposition.aovGap), series("交互项", decomposition.interaction), ...factors.map(({ factor, label }) => series(label, factor.contribution))]);
   for (const [path, label] of [["totalGap", "总差异"], ["orderVolumeGap", "订单量差异"], ["aovGap", "客单价差异"], ["interaction", "交互项"]] as const) {
     builder.source(`decomposition.${path}`, "decomposition", label, decomposition[path], "currency", [], [drivers]);
   }
-  for (const factor of factors) {
-    const id = textValue(factor.factor, "factor");
-    builder.source("factorContributions.contribution", "factor_contribution", textValue(factor.label, "归因因素"), factor.contribution, "currency", [id], [drivers]);
+  for (const { factor, id, label } of factors) {
+    builder.source("factorContributions.contribution", "factor_contribution", label, factor.contribution, "currency", [id], [drivers]);
   }
   const dimensions = records(decomposition.dimensionContributions);
   for (const [dimension, type, title] of [["channel", "channel_contribution", "渠道贡献"], ["category", "category_contribution", "品类贡献"], ["daypart", "daypart_contribution", "时段贡献"]] as const) {
-    const items = dimensions.filter((item) => item.dimension === dimension);
-    const evidence = builder.evidence(`decomposition.${dimension}`, type, title, "currency", "差异贡献", items.map((item) => series(textValue(item.name, dimension), item.contribution)));
-    for (const item of items) builder.source("decomposition.dimensionContributions.contribution", "dimension_contribution", `${textValue(item.name, dimension)}贡献`, item.contribution, "currency", [dimension, textValue(item.name, dimension)], [evidence]);
+    const items = dimensions.flatMap((item) => {
+      const name = textValue(item.name);
+      return item.dimension === dimension && name ? [{ item, name }] : [];
+    });
+    const evidence = builder.evidence(`decomposition.${dimension}`, type, `${title}差异`, "currency", "差异贡献", items.map(({ item, name }) => series(name, item.contribution)));
+    for (const { item, name } of items) builder.source("decomposition.dimensionContributions.contribution", "dimension_contribution", `${name}差异贡献`, item.contribution, "currency", [dimension, name], [evidence]);
   }
+  addAttributionBreakdown(builder, data.channelBreakdown, "channel", "channel_contribution", "渠道贡献");
+  addAttributionBreakdown(builder, data.categoryBreakdown, "category", "category_contribution", "品类贡献");
+  addAttributionBreakdown(builder, data.daypartBreakdown, "daypart", "daypart_contribution", "时段贡献");
   const refunds = records(data.refundByStore);
   if (refunds.length > 0) {
-    const variance = builder.evidence("refundByStore", "store_target_variance", "门店退款差异", "currency", "退款额", refunds.map((item) => series(subjectOf(item, "storeId", "storeName").label, item.refundAmount)));
-    for (const item of refunds) {
+    const validRefunds = refunds.flatMap((item) => {
       const subject = subjectOf(item, "storeId", "storeName");
+      return subject ? [{ item, subject }] : [];
+    });
+    const variance = builder.evidence("refundByStore", "store_target_variance", "门店退款差异", "currency", "退款额", validRefunds.map(({ item, subject }) => series(subject.label, item.refundAmount)));
+    for (const { item, subject } of validRefunds) {
       builder.source("refundByStore.refundAmount", "store_refund", `${subject.label}退款额`, item.refundAmount, "currency", [subject.id], [variance]);
     }
   }
 }
 
-function contributionEvidence(builder: CatalogBuilder, stores: UnknownRecord[], key: string, type: InsightEvidenceType, title: string): string | null {
-  return builder.evidence(key, type, title, "currency", "销售额", stores.flatMap((store) => {
-    const subject = subjectOf(store, "storeId", "storeName");
-    return Object.entries(record(store[key])).map(([name, value]) => series(`${subject.label}-${name}`, value));
+function addAttributionBreakdown(
+  builder: CatalogBuilder,
+  value: unknown,
+  dimension: string,
+  type: InsightEvidenceType,
+  title: string
+): void {
+  const entries = Object.entries(record(value)).flatMap(([rawName, amount]) => {
+    const name = textValue(rawName);
+    return name ? [{ name, amount }] : [];
+  });
+  const evidence = builder.evidence(`${dimension}Breakdown`, type, title, "currency", "销售额", entries.map(({ name, amount }) => series(name, amount)));
+  for (const { name, amount } of entries) {
+    builder.source(`${dimension}Breakdown`, `${dimension}_contribution`, `${name}销售额`, amount, "currency", [name], [evidence]);
+  }
+}
+
+interface StoreWithSubject {
+  store: UnknownRecord;
+  subject: { id: string; label: string };
+}
+
+function contributionEvidence(builder: CatalogBuilder, stores: StoreWithSubject[], key: string, type: InsightEvidenceType, title: string): string | null {
+  return builder.evidence(key, type, title, "currency", "销售额", stores.flatMap(({ store, subject }) => {
+    return Object.entries(record(store[key])).flatMap(([rawName, value]) => {
+      const name = textValue(rawName);
+      return name ? [series(`${subject.label}-${name}`, value)] : [];
+    });
   }));
 }
 
 function addBreakdownSources(builder: CatalogBuilder, store: UnknownRecord, subject: { id: string; label: string }, key: string, metricCode: string, evidenceId: string | null): void {
-  for (const [name, value] of Object.entries(record(store[key]))) builder.source(`stores.${key}`, metricCode, `${subject.label}${name}销售额`, value, "currency", [subject.id, name], [evidenceId]);
+  for (const [rawName, value] of Object.entries(record(store[key]))) {
+    const name = textValue(rawName);
+    if (!name) continue;
+    builder.source(`stores.${key}`, metricCode, `${subject.label}${name}销售额`, value, "currency", [subject.id, name], [evidenceId]);
+  }
 }
 
 function record(value: unknown): UnknownRecord {
@@ -359,16 +424,24 @@ function record(value: unknown): UnknownRecord {
 }
 
 function records(value: unknown): UnknownRecord[] {
-  return Array.isArray(value) ? value.map(record) : [];
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is UnknownRecord =>
+          item !== null && typeof item === "object" && !Array.isArray(item)
+      )
+    : [];
 }
 
-function subjectOf(value: UnknownRecord, idKey: string, labelKey: string): { id: string; label: string } {
-  const id = textValue(value[idKey], "overall");
-  return { id, label: textValue(value[labelKey], id) };
+function subjectOf(value: UnknownRecord, idKey: string, labelKey: string): { id: string; label: string } | null {
+  const id = textValue(value[idKey]);
+  const label = textValue(value[labelKey]);
+  return id && label ? { id, label } : null;
 }
 
-function textValue(value: unknown, fallback: string): string {
-  return typeof value === "string" && value.length > 0 ? value : fallback;
+function textValue(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -392,5 +465,12 @@ function formatValue(value: number, unit: Unit): string {
 }
 
 function stableId(...parts: string[]): string {
-  return parts.map((part) => part.normalize("NFKC").toLowerCase().replace(/[^\p{Letter}\p{Number}]+/gu, "-").replace(/^-|-$/g, "") || "value").join("-");
+  const readable = parts
+    .map((part) => part.normalize("NFKC").toLowerCase().replace(/[^\p{Letter}\p{Number}]+/gu, "-").replace(/^-|-$/g, "") || "value")
+    .join("-");
+  const hash = createHash("sha256")
+    .update(JSON.stringify(parts))
+    .digest("hex")
+    .slice(0, 8);
+  return `${readable}-${hash}`;
 }

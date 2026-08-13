@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AnalysisIntent } from "../../src/modules/domain/analysis-types";
+import { formatCompare } from "../../src/modules/chat/answer-formatters/compare";
 import type { InsightDraft, InsightScope } from "../../src/modules/insights/insight-types";
 import {
   buildInsightSourceCatalog,
@@ -84,8 +85,8 @@ const fixtures: Record<string, Record<string, unknown>> = {
   compare: {
     dateRange: { start: "2026-08-01", end: "2026-08-07" },
     stores: [
-      { storeId: "S001", storeName: "东店", totalSales: 95000, totalTarget: 107710, achievementRate: "88.2", totalOrders: 1800, avgOrderValue: 52.78, totalRefund: 4100, totalCancelled: 27, refundRate: "4.3", channelBreakdown: { 堂食: 62000, 外卖: 33000 }, categoryBreakdown: { 正餐: 68000, 饮品: 27000 }, daypartBreakdown: { 午餐: 51000, 晚餐: 44000 }, dailySales: [{ date: "2026-08-01", actual_sales: 13000, sales_target: 15000 }] },
-      { storeId: "S002", storeName: "西店", totalSales: 97000, totalTarget: 94083, achievementRate: "103.1", totalOrders: 1600, avgOrderValue: 60.63, totalRefund: 2100, totalCancelled: 14, refundRate: "2.2", channelBreakdown: { 堂食: 58000, 外卖: 39000 }, categoryBreakdown: { 正餐: 70000, 饮品: 27000 }, daypartBreakdown: { 午餐: 47000, 晚餐: 50000 }, dailySales: [{ date: "2026-08-01", actual_sales: 14500, sales_target: 14000 }] },
+      { storeId: "S001", storeName: "东店", totalSales: 95000, totalTarget: 107710, achievementRate: 88.2, totalOrders: 1800, avgOrderValue: 52.78, totalRefund: 4100, totalCancelled: 27, refundRate: 4.3, channelBreakdown: { 堂食: 62000, 外卖: 33000 }, categoryBreakdown: { 正餐: 68000, 饮品: 27000 }, daypartBreakdown: { 午餐: 51000, 晚餐: 44000 }, dailySales: [{ date: "2026-08-01", actual_sales: 13000, sales_target: 15000 }] },
+      { storeId: "S002", storeName: "西店", totalSales: 97000, totalTarget: 94083, achievementRate: 103.1, totalOrders: 1600, avgOrderValue: 60.63, totalRefund: 2100, totalCancelled: 14, refundRate: 2.2, channelBreakdown: { 堂食: 58000, 外卖: 39000 }, categoryBreakdown: { 正餐: 70000, 饮品: 27000 }, daypartBreakdown: { 午餐: 47000, 晚餐: 50000 }, dailySales: [{ date: "2026-08-01", actual_sales: 14500, sales_target: 14000 }] },
     ], anomalies: [],
   },
   attribution: {
@@ -127,6 +128,95 @@ for (const [intent, evidenceTypes, metricCodes] of expectedCatalog) {
     })), `source without matching evidence for ${intent}`);
   });
 }
+
+test("all nine catalogs preserve representative SQL paths exactly", () => {
+  const cases = [
+    ["order_trend", "total_orders", 820, "count", ["S001"], "period_variance", "count", [820], [900]],
+    ["aov_trend", "avg_aov", 46.25, "currency", ["S001"], "period_variance", "currency", [46.25], [50]],
+    ["channel_mix", "channel_pct", 62.5, "percentage", ["堂食"], "channel_contribution", "percentage", [62.5, 37.5], []],
+    ["daypart_analysis", "daypart_pct", 51.1, "percentage", ["午餐"], "daypart_contribution", "percentage", [51.1, 48.9], []],
+    ["promotion_contribution", "contribution_rate", 28.4, "percentage", [], "metric_drivers", "percentage", [28.4], []],
+    ["refund_rate", "daily_refund_rate", 5.1, "percentage", ["2026-08-03"], "anomaly_dates", "percentage", [5.1], []],
+    ["anomaly_detection", "anomaly_day", 9200, "currency", ["S001", "2026-08-03"], "anomaly_dates", "currency", [9200], [15000]],
+    ["compare", "achievement_rate", 88.2, "percentage", ["S001"], "store_target_variance", "percentage", [88.2, 103.1], []],
+    ["attribution", "sales_summary", 192000, "currency", [], "period_variance", "currency", [192000], [201793]],
+  ] as const;
+
+  for (const [intent, metricCode, value, unit, subjectIds, evidenceType, evidenceUnit, values, baselines] of cases) {
+    const catalog = buildInsightSourceCatalog({ intent, analysisData: fixtures[intent] });
+    const source = catalog.findingSources.find((item) => item.metricCode === metricCode && item.value === value);
+    assert.ok(source, `missing exact source for ${intent}`);
+    assert.equal(source.unit, unit);
+    assert.deepEqual(source.subjectIds, subjectIds);
+    const candidate = catalog.evidenceCandidates.find((item) => source.evidenceCandidateIds.includes(item.id) && item.type === evidenceType);
+    assert.ok(candidate, `missing exact evidence for ${intent}`);
+    assert.equal(candidate.unit, evidenceUnit);
+    assert.deepEqual(candidate.series.map((item) => item.value), values);
+    assert.deepEqual(candidate.series.flatMap((item) => item.baseline === undefined ? [] : [item.baseline]), baselines);
+  }
+});
+
+test("anomaly sales findings do not claim z-score evidence support", () => {
+  const catalog = buildInsightSourceCatalog({ intent: "anomaly_detection", analysisData: fixtures.anomaly_detection });
+  const source = catalog.findingSources.find((item) => item.value === 9200);
+  assert.ok(source);
+  assert.deepEqual(source.evidenceCandidateIds.map((id) => catalog.evidenceCandidates.find((item) => item.id === id)?.unit), ["currency"]);
+});
+
+test("stable IDs disambiguate raw identities that share a readable slug", () => {
+  const catalog = buildInsightSourceCatalog({
+    intent: "channel_mix",
+    analysisData: {
+      channelPct: [
+        { channel: "A/B", sales: 30, orders: 3, salesPct: 30 },
+        { channel: "A-B", sales: 70, orders: 7, salesPct: 70 },
+      ],
+      byStore: [{ storeId: "S001", storeName: "东店", channels: [{ channel: "A/B", sales: 30, orders: 3, salesPct: 30 }, { channel: "A-B", sales: 70, orders: 7, salesPct: 70 }] }],
+    },
+  });
+  const sources = catalog.findingSources.filter((item) => item.metricCode === "channel_pct");
+  assert.equal(new Set(sources.map((item) => item.id)).size, 2);
+  const series = catalog.evidenceCandidates.find((item) => item.unit === "percentage")?.series || [];
+  assert.equal(new Set(series.map((item) => item.key)).size, 2);
+  assert.match(sources[0].id, /a-b-[a-f0-9]{8}$/);
+});
+
+test("invalid identities are skipped without fabricating labels", () => {
+  const data = structuredClone(fixtures.order_trend) as { stores: Array<Record<string, unknown>> };
+  data.stores.unshift({ storeId: " ", storeName: "", totalOrders: 999, totalOrderTarget: 1000, orderAchievementRate: 99.9, trendPct: 1 });
+  data.stores.push(null as unknown as Record<string, unknown>);
+  const catalog = buildInsightSourceCatalog({ intent: "order_trend", analysisData: data as unknown as Record<string, unknown> });
+  assert.equal(catalog.findingSources.some((item) => item.value === 999), false);
+  assert.equal(catalog.findingSources.some((item) => item.subjectIds.includes("overall")), false);
+  assert.throws(() => buildInsightSourceCatalog({ intent: "order_trend", analysisData: { stores: [{ totalOrders: 1, totalOrderTarget: 1, orderAchievementRate: 100, trendPct: 0 }] } }), InsightValidationError);
+});
+
+test("attribution top-level breakdowns remain authoritative without decomposition dimensions", () => {
+  const data = structuredClone(fixtures.attribution) as Record<string, unknown> & { decomposition: { dimensionContributions: unknown[] } };
+  data.decomposition.dimensionContributions = [];
+  const catalog = buildInsightSourceCatalog({ intent: "attribution", analysisData: data });
+  for (const [metricCode, value, type, subject] of [
+    ["channel_contribution", 120000, "channel_contribution", "堂食"],
+    ["category_contribution", 138000, "category_contribution", "正餐"],
+    ["daypart_contribution", 98000, "daypart_contribution", "午餐"],
+  ] as const) {
+    const source = catalog.findingSources.find((item) => item.metricCode === metricCode && item.value === value);
+    assert.ok(source);
+    assert.deepEqual(source.subjectIds, [subject]);
+    const evidence = catalog.evidenceCandidates.find((item) => source.evidenceCandidateIds.includes(item.id));
+    assert.equal(evidence?.type, type);
+    assert.equal(evidence?.unit, "currency");
+  }
+});
+
+test("compare uses numeric SQL rates in evidence and presentation", () => {
+  const catalog = buildInsightSourceCatalog({ intent: "compare", analysisData: fixtures.compare });
+  assert.deepEqual(catalog.findingSources.filter((item) => item.metricCode === "achievement_rate").map((item) => item.value), [88.2, 103.1]);
+  assert.deepEqual(catalog.findingSources.filter((item) => item.metricCode === "refund_rate").map((item) => item.value), [4.3, 2.2]);
+  const formatted = formatCompare(fixtures.compare);
+  assert.match(formatted, /88\.20%/);
+  assert.match(formatted, /4\.30%/);
+});
 
 test("numeric strings, missing values, NaN, and infinities are skipped", () => {
   const data = structuredClone(fixtures.compare) as { stores: Array<Record<string, unknown>> };
@@ -238,6 +328,28 @@ test("materialization rejects non-finite catalog facts", () => {
     evidenceCandidates: compareCatalog.evidenceCandidates.map((item, index) => index === 0 ? { ...item, series: item.series.map((series, seriesIndex) => seriesIndex === 0 ? { ...series, value: Number.POSITIVE_INFINITY } : series) } : item),
   };
   assert.throws(() => materializeInsightSnapshot({ ...materializeInput, catalog: badSeriesCatalog }), InsightValidationError);
+});
+
+test("materialization rejects duplicate catalog IDs and unsupported evidence facts", () => {
+  const duplicateSources: InsightSourceCatalog = { ...compareCatalog, findingSources: [...compareCatalog.findingSources, { ...compareCatalog.findingSources[0] }] };
+  assert.throws(() => materializeInsightSnapshot({ ...materializeInput, catalog: duplicateSources }), (error: unknown) => error instanceof InsightValidationError && error.code === "DUPLICATE_SOURCE_ID");
+  const duplicateEvidence: InsightSourceCatalog = { ...compareCatalog, evidenceCandidates: [...compareCatalog.evidenceCandidates, { ...compareCatalog.evidenceCandidates[0] }] };
+  assert.throws(() => materializeInsightSnapshot({ ...materializeInput, catalog: duplicateEvidence }), (error: unknown) => error instanceof InsightValidationError && error.code === "DUPLICATE_EVIDENCE_ID");
+
+  const firstSource = compareCatalog.findingSources[0];
+  const unrelated = compareCatalog.evidenceCandidates.find((item) =>
+    item.unit === firstSource.unit &&
+    !item.series.some((series) => series.value === firstSource.value || series.baseline === firstSource.value)
+  )!;
+  const maliciousCatalog: InsightSourceCatalog = {
+    ...compareCatalog,
+    findingSources: compareCatalog.findingSources.map((item) => item.id === firstSource.id ? { ...item, evidenceCandidateIds: [unrelated.id] } : item),
+  };
+  const maliciousDraft: InsightDraft = {
+    ...validDraft,
+    findings: validDraft.findings.map((item) => item.sourceId === firstSource.id ? { ...item, evidenceIds: [unrelated.id] } : item),
+  };
+  assert.throws(() => materializeInsightSnapshot({ ...materializeInput, catalog: maliciousCatalog, draft: maliciousDraft }), (error: unknown) => error instanceof InsightValidationError && error.code === "UNSUPPORTED_EVIDENCE_FACT");
 });
 
 test("verification references must resolve and observed facts still need evidence", () => {
