@@ -432,3 +432,163 @@ test("business agent resolves and executes published custom metrics", async () =
   assert.match(result.content, /自定义销售额/);
   assert.match(result.content, /772,076\.00/);
 });
+
+test("business agent offers authorized SQL data before calling its answer model", async () => {
+  const model = new FakeAgentModel("business-model", () => "完整业务回答");
+  const agent = createBusinessAgent({
+    metricQueryExecutor: compareExecutor(),
+    model,
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  const result = await agent.execute({
+    sessionId: "projection-success",
+    question: "对比 S001 和 S002 的门店表现",
+    onAnalysisReady: async (analysis) => {
+      assert.equal(analysis.intent, "compare");
+      assert.equal(analysis.accessRequirements[0].tableName, "store_master");
+      assert.deepEqual(analysis.storeIds, ["S001", "S002"]);
+      assert.ok(analysis.analysisData);
+      return { content: "洞察已更新" };
+    },
+  });
+
+  assert.equal(result.content, "洞察已更新");
+  assert.equal(model.requests.length, 0);
+});
+
+test("a null projection keeps the existing full-answer path", async () => {
+  const content: string[] = [];
+  const model = new FakeAgentModel("business-model", ({ onToken }) => {
+    onToken?.("完整业务回答");
+    return "完整业务回答";
+  });
+  const agent = createBusinessAgent({
+    metricQueryExecutor: compareExecutor(),
+    model,
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+  const result = await agent.execute({
+    sessionId: "projection-fallback",
+    question: "对比 S001 和 S002 的门店表现",
+    onAnalysisReady: async () => null,
+    stream: {
+      emitStatus() {}, emitReasoning() {}, emitContent(value) { content.push(value); }, emitInsight() {},
+    },
+  });
+  assert.equal(result.content, "完整业务回答");
+  assert.deepEqual(content, ["完整业务回答"]);
+});
+
+test("attribution is generated once and reused when projection falls back", async () => {
+  let calls = 0;
+  const content: string[] = [];
+  const agent = createBusinessAgent({
+    metricQueryExecutor: attributionExecutor(),
+    model: new FakeAgentModel("business-model", () => { throw new Error("business model must not run"); }),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: {
+      async analyze(request) {
+        calls += 1;
+        request.stream?.emitContent("不应泄漏的归因流");
+        return "完整归因正文";
+      },
+    },
+  });
+  const result = await agent.execute({
+    sessionId: "attribution-projection",
+    question: "S001 为什么没有达标",
+    onAnalysisReady: async (analysis) => {
+      assert.equal(analysis.attributionNarrative, "完整归因正文");
+      return null;
+    },
+    stream: {
+      emitStatus() {}, emitReasoning() {}, emitContent(value) { content.push(value); }, emitInsight() {},
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.content, "完整归因正文");
+  assert.deepEqual(content, ["完整归因正文"]);
+});
+
+test("successful attribution projection suppresses narrative streaming and business model", async () => {
+  let calls = 0;
+  const content: string[] = [];
+  const model = new FakeAgentModel("business-model", () => {
+    throw new Error("business model must not run");
+  });
+  const agent = createBusinessAgent({
+    metricQueryExecutor: attributionExecutor(),
+    model,
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: {
+      async analyze(request) {
+        calls += 1;
+        request.stream?.emitContent("归因正文不得进入流");
+        return "完整归因正文";
+      },
+    },
+  });
+
+  const result = await agent.execute({
+    sessionId: "attribution-projection-success",
+    question: "S001 为什么没有达标",
+    onAnalysisReady: async (analysis) => {
+      assert.equal(analysis.attributionNarrative, "完整归因正文");
+      return { content: "洞察与行动已更新" };
+    },
+    stream: {
+      emitStatus() {}, emitReasoning() {}, emitContent(value) { content.push(value); }, emitInsight() {},
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(model.requests.length, 0);
+  assert.equal(result.content, "洞察与行动已更新");
+  assert.deepEqual(content, []);
+});
+
+function compareExecutor(): SqlMetricQueryExecutor {
+  return {
+    async listStoreIds() { return ["S001", "S002"]; },
+    async execute(intent, scope) {
+      return {
+        intent,
+        source: "sql",
+        data: {
+          dateRange: { start: scope.startDate, end: scope.endDate },
+          stores: scope.storeIds.map((storeId, index) => ({
+            storeId, storeName: `门店${index + 1}`, totalSales: 90 + index * 20,
+            totalTarget: 100, achievementRate: 90 + index * 20, totalOrders: 9 + index,
+            avgOrderValue: 10 + index, totalRefund: index, refundRate: index,
+            channelBreakdown: {}, categoryBreakdown: {}, daypartBreakdown: {},
+          })),
+        },
+      };
+    },
+  };
+}
+
+function attributionExecutor(): SqlMetricQueryExecutor {
+  return {
+    async listStoreIds() { return ["S001"]; },
+    async execute(intent, scope) {
+      return { intent, source: "sql", data: {
+        dateRange: { start: scope.startDate, end: scope.endDate },
+        salesSummary: { totalSales: 90, totalTarget: 100, achievementRate: 90, totalOrders: 9, avgOrderValue: 10 },
+        orderVsAov: { avgDailySales: 100, avgDailyOrders: 10, avgAOV: 10, actualDailySales: 90, actualDailyOrders: 9, salesDrop: 10, ordersDrop: 1, aovDrop: 0, mainIssue: "orders" },
+        decomposition: { totalGap: -10, orderVolumeGap: -10, aovGap: 0, interaction: 0, mainIssue: "orders", dimensionContributions: [] },
+        factorContributions: [
+          { factor: "orders", label: "订单量", contribution: -10 },
+          { factor: "aov", label: "客单价", contribution: 0 },
+        ],
+        channelBreakdown: { 线上: 30, 线下: 60 }, categoryBreakdown: { 餐饮: 90 }, daypartBreakdown: { 晚间: 90 },
+        dailyDetail: [], refundSummary: { totalRefund: 0, totalCancelled: 0, refundRate: 0 },
+        refundDaily: [], refundByStore: [], managerFeedback: [],
+        promotionSummary: { totalDiscount: 0, totalPromoUnits: 0, promoCount: 0, topPromotions: [] },
+      } };
+    },
+  };
+}

@@ -13,6 +13,11 @@ import {
   NOOP_CHAT_STREAM,
   type ChatStreamCallbacks,
 } from "@/modules/chat/chat-stream";
+import {
+  buildInsightReceipt,
+  type InsightApplication,
+} from "@/modules/insights/insight-application";
+import { shouldGenerateInsight } from "@/modules/insights/insight-trigger-policy";
 
 export interface ChatCommand {
   question: string;
@@ -39,6 +44,7 @@ export interface ChatApplication {
 export interface ChatApplicationDependencies {
   governanceAgent: GovernanceAgent;
   businessAgent: BusinessAgent;
+  insightApplication?: InsightApplication;
 }
 
 export class ChatApplicationError extends Error {
@@ -58,6 +64,7 @@ export class ChatApplicationError extends Error {
 export function createChatApplication({
   governanceAgent,
   businessAgent,
+  insightApplication,
 }: ChatApplicationDependencies): ChatApplication {
   return {
     async execute(command) {
@@ -70,7 +77,11 @@ export function createChatApplication({
       }
 
       const sessionId = command.sessionId?.trim() || randomUUID();
+      const userId = command.userId?.trim() || "system-admin";
       const stream = command.stream || NOOP_CHAT_STREAM;
+      const insightToken = insightApplication
+        ? insightApplication.beginRequest(userId, randomUUID(), Date.now())
+        : null;
       stream.emitStatus("governance");
       const governanceResult = await governanceAgent.review({
         sessionId,
@@ -91,11 +102,38 @@ export function createChatApplication({
       try {
         return await businessAgent.execute({
           ...governanceResult.handoff,
-          userId: command.userId?.trim() || "system-admin",
+          userId,
           storeIds: command.storeIds,
           startDate: command.startDate,
           endDate: command.endDate,
           stream,
+          onAnalysisReady:
+            insightApplication && insightToken
+              ? async (analysis) => {
+                  if (!shouldGenerateInsight(analysis.intent)) return null;
+                  stream.emitInsight({ status: "generating" });
+                  try {
+                    const snapshot = await insightApplication.generateForAnalysis(
+                      insightToken,
+                      analysis
+                    );
+                    stream.emitInsight({
+                      status: "updated",
+                      insightId: snapshot.id,
+                      findingCount: snapshot.findings.length,
+                      actionCount: snapshot.actions.length,
+                    });
+                    return { content: buildInsightReceipt(snapshot) };
+                  } catch (error) {
+                    console.error(
+                      "Insight projection failed:",
+                      error instanceof Error ? error.name : "UnknownError"
+                    );
+                    stream.emitInsight({ status: "failed" });
+                    return null;
+                  }
+                }
+              : undefined,
         });
       } catch (error) {
         if (

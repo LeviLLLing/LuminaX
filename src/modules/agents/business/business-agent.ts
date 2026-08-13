@@ -25,6 +25,7 @@ import {
   DEFAULT_START_DATE,
 } from "@/modules/domain/constants";
 import type { AnalysisIntent } from "@/modules/domain/analysis-types";
+import type { DataAccessRequirement } from "@/modules/admin/permissions/permission-types";
 import {
   classifyIntent,
   extractDateRange,
@@ -46,6 +47,25 @@ export interface BusinessAgentRequest extends GovernanceHandoff {
   startDate?: string;
   endDate?: string;
   stream?: ChatStreamCallbacks;
+  onAnalysisReady?: (
+    analysis: BusinessAnalysisContext
+  ) => Promise<BusinessResponseOverride | null>;
+}
+
+export interface BusinessAnalysisContext {
+  question: string;
+  intent: AnalysisIntent;
+  analysisData: Record<string, unknown>;
+  attributionNarrative: string | null;
+  fallbackContent: string;
+  storeIds: string[];
+  startDate: string;
+  endDate: string;
+  accessRequirements: DataAccessRequirement[];
+}
+
+export interface BusinessResponseOverride {
+  content: string;
 }
 
 export interface BusinessAgentResult {
@@ -242,16 +262,48 @@ export function createBusinessAgent({
         attributionData
       );
 
-      const content =
+      const attributionNarrative =
         intentResult.intent === "attribution" && attributionData
           ? await attributionAgent.analyze({
               sessionId: request.sessionId,
               question: request.question,
               analysisData: attributionData,
               fallbackContent,
-              stream: request.stream,
+              stream: request.onAnalysisReady ? NOOP_CHAT_STREAM : request.stream,
             })
-          : await generateBusinessAnswer({
+          : null;
+
+      if (request.onAnalysisReady && attributionData) {
+        const override = await request.onAnalysisReady({
+          question: request.question,
+          intent: intentResult.intent,
+          analysisData: attributionData,
+          attributionNarrative,
+          fallbackContent,
+          storeIds: [...storeIds],
+          startDate,
+          endDate,
+          accessRequirements: structuredClone(
+            FIXED_METRIC_ACCESS_REQUIREMENTS[metricIntent]
+          ),
+        });
+        if (override) {
+          memory.remember(
+            request.sessionId,
+            { role: "user", content: request.question },
+            { role: "assistant", content: override.content }
+          );
+          return createResult(
+            intentResult,
+            override.content,
+            storeIds,
+            startDate,
+            endDate
+          );
+        }
+      }
+
+      const content = attributionNarrative ?? await generateBusinessAnswer({
               model,
               memory,
               sessionId: request.sessionId,
@@ -261,6 +313,10 @@ export function createBusinessAgent({
               fallbackContent,
               stream: request.stream,
             });
+
+      if (attributionNarrative && request.onAnalysisReady) {
+        (request.stream || NOOP_CHAT_STREAM).emitContent(attributionNarrative);
+      }
 
       if (intentResult.intent === "attribution") {
         memory.remember(

@@ -45,6 +45,62 @@ test("public chat SSE wire format remains stable", async () => {
   );
 });
 
+test("chat HTTP adapter adds insight events without changing existing payloads", async (context) => {
+  context.mock.method(authApplication, "authenticateSession", async () => ({
+    id: "contract-user",
+    username: "contract-user",
+    displayName: "Contract User",
+    role: "analyst",
+  }));
+  const application: ChatApplication = {
+    async execute(command) {
+      command.stream?.emitStatus("computing");
+      command.stream?.emitInsight({ status: "generating" });
+      command.stream?.emitInsight({
+        status: "updated",
+        insightId: "insight-1",
+        findingCount: 3,
+        actionCount: 2,
+      });
+      command.stream?.emitContent("洞察与行动已更新");
+      return {
+        intentResult: {
+          intent: "compare",
+          storeIds: ["S001"],
+          startDate: null,
+          endDate: null,
+          relevant: true,
+          outOfScope: false,
+        },
+        content: "洞察与行动已更新",
+        storeIds: ["S001"],
+        startDate: "2025-05-01",
+        endDate: "2025-05-14",
+      };
+    },
+  };
+  const response = await handleChatHttpRequest(
+    new NextRequest("http://localhost/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=contract-session`,
+      },
+      body: JSON.stringify({ question: "对比门店表现" }),
+    }),
+    application
+  );
+
+  assert.equal(
+    await response.text(),
+    'data: {"type":"status","status":"computing"}\n\n' +
+      'data: {"type":"insight","status":"generating"}\n\n' +
+      'data: {"type":"insight","status":"updated","insightId":"insight-1","findingCount":3,"actionCount":2}\n\n' +
+      'data: {"type":"content","content":"洞察与行动已更新"}\n\n' +
+      'data: {"type":"intent","intent":"compare","storeIds":["S001"],"startDate":"2025-05-01","endDate":"2025-05-14"}\n\n'
+  );
+});
+
 test("public JSON errors preserve status and body", async (context) => {
   context.mock.method(authApplication, "authenticateSession", async () => ({
     id: "contract-user",
