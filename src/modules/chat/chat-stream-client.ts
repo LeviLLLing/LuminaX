@@ -6,6 +6,7 @@ import {
   DEFAULT_START_DATE,
 } from "@/modules/domain/constants";
 import type { IntentViewMetadata } from "@/modules/chat/view-router";
+import type { InsightStreamEvent } from "@/modules/insights/insight-types";
 
 export interface ChatStreamRequest {
   question: string;
@@ -18,12 +19,13 @@ export interface ChatStreamRequest {
 export interface ChatStreamHandlers {
   onIntent: (metadata: IntentViewMetadata) => void;
   onContent: (content: string) => void;
+  onInsight?: (event: InsightStreamEvent) => void;
   onStatus?: (status: string) => void;
   onReasoning?: (delta: string) => void;
 }
 
 export interface ChatStreamPayload {
-  type?: "intent" | "content" | "status" | "reasoning" | "error";
+  type?: "intent" | "content" | "status" | "reasoning" | "error" | "insight";
   intent?: AnalysisIntent;
   storeIds?: unknown;
   startDate?: unknown;
@@ -32,6 +34,9 @@ export interface ChatStreamPayload {
   status?: unknown;
   delta?: unknown;
   error?: unknown;
+  insightId?: unknown;
+  findingCount?: unknown;
+  actionCount?: unknown;
 }
 
 export const CHAT_STATUS_LABELS: Record<string, string> = {
@@ -99,6 +104,11 @@ export async function streamChatMessage(
         handlers.onStatus?.(payload.status);
       }
 
+      if (payload.type === "insight") {
+        const event = normalizeInsightEvent(payload);
+        if (event) handlers.onInsight?.(event);
+      }
+
       if (payload.type === "reasoning" && typeof payload.delta === "string") {
         fullReasoning += payload.delta;
         handlers.onReasoning?.(fullReasoning);
@@ -128,6 +138,31 @@ export async function streamChatMessage(
   if (buffer.trim()) consumeEvent(buffer);
 
   return receivedIntent;
+}
+
+function normalizeInsightEvent(payload: ChatStreamPayload): InsightStreamEvent | null {
+  if (payload.status === "generating" || payload.status === "failed") {
+    return { status: payload.status };
+  }
+  if (
+    payload.status === "updated" &&
+    typeof payload.insightId === "string" &&
+    payload.insightId.length > 0 &&
+    Number.isInteger(payload.findingCount) &&
+    typeof payload.findingCount === "number" &&
+    payload.findingCount >= 0 &&
+    Number.isInteger(payload.actionCount) &&
+    typeof payload.actionCount === "number" &&
+    payload.actionCount >= 0
+  ) {
+    return {
+      status: "updated",
+      insightId: payload.insightId,
+      findingCount: payload.findingCount,
+      actionCount: payload.actionCount,
+    };
+  }
+  return null;
 }
 
 async function readChatErrorMessage(response: Response): Promise<string> {

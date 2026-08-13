@@ -89,6 +89,38 @@ test("SSE parser keeps protocol handling outside the React hook", () => {
   assert.equal(payloads[1].content, "done");
 });
 
+test("chat client parses insight lifecycle events", () => {
+  const payloads = parseServerSentEvent(
+    'data: {"type":"insight","status":"updated","insightId":"i1","findingCount":3,"actionCount":2}'
+  );
+  assert.deepEqual(payloads[0], {
+    type: "insight",
+    status: "updated",
+    insightId: "i1",
+    findingCount: 3,
+    actionCount: 2,
+  });
+});
+
+test("chat stream dispatches valid insight events and ignores malformed ones", async (context) => {
+  const events: unknown[] = [];
+  context.mock.method(globalThis, "fetch", async () => new Response(
+    'data: {"type":"insight","status":"generating"}\n\n' +
+    'data: {"type":"insight","status":"updated","insightId":"i1","findingCount":3,"actionCount":2}\n\n' +
+    'data: {"type":"insight","status":"updated","insightId":7}\n\n' +
+    'data: {"type":"content","content":"done"}\n\n',
+    { status: 200, headers: { "Content-Type": "text/event-stream" } }
+  ));
+  await streamChatMessage(
+    { question: "compare", sessionId: "s1" },
+    { onIntent() {}, onContent() {}, onInsight(event) { events.push(event); } }
+  );
+  assert.deepEqual(events, [
+    { status: "generating" },
+    { status: "updated", insightId: "i1", findingCount: 3, actionCount: 2 },
+  ]);
+});
+
 test("chat stream preserves a server permission error", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>

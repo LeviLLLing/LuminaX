@@ -20,6 +20,7 @@ import {
   type InsightView,
 } from "@/modules/workbench/workbench-presentation";
 import type { WorkbenchContext } from "@/modules/workbench/workbench-types";
+import type { InsightScope } from "@/modules/insights/insight-types";
 
 interface GeneratedReport {
   html: string;
@@ -146,6 +147,34 @@ export function useLuminaXController(context: WorkbenchContext | null) {
     [invalidateReportRequest]
   );
 
+  const activeInsightScope = useMemo(
+    () => ({ storeIds: activeStoreIds, startDate, endDate }),
+    [activeStoreIds, endDate, startDate]
+  );
+
+  const applyInsightScope = useCallback((scope: InsightScope) => {
+    const authorizedStoreIds = new Set(authorizedStores.map((store) => store.store_id));
+    const uniqueScopeStoreIds = [...new Set(scope.storeIds)];
+    if (uniqueScopeStoreIds.length !== scope.storeIds.length) return false;
+    const allowed = uniqueScopeStoreIds.filter((id) => authorizedStoreIds.has(id));
+    if (allowed.length !== scope.storeIds.length || allowed.length === 0) return false;
+    invalidateReportRequest();
+    if (allowed.length === authorizedStores.length) {
+      setCompareStores([]);
+      setSelectedStore("all");
+    } else if (allowed.length > 1) {
+      setCompareStores(allowed);
+      setSelectedStore("all");
+    } else {
+      setCompareStores([]);
+      setSelectedStore(allowed[0]);
+    }
+    setStartDate(scope.startDate);
+    setEndDate(scope.endDate);
+    setInsightView("analysis");
+    return true;
+  }, [authorizedStores, invalidateReportRequest]);
+
   const applyIntentMetadata = useCallback(
     (metadata: IntentViewMetadata) => {
       if (context === null) return;
@@ -219,6 +248,7 @@ export function useLuminaXController(context: WorkbenchContext | null) {
   );
 
   return {
+    activeInsightScope,
     activeStoreIds,
     authorizedStores,
     chartOptions,
@@ -239,5 +269,6 @@ export function useLuminaXController(context: WorkbenchContext | null) {
     setStartDate: changeStartDate,
     startDate,
     applyIntentMetadata,
+    applyInsightScope,
   };
 }
