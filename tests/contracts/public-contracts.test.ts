@@ -16,6 +16,7 @@ import { DataAccessDeniedError } from "../../src/modules/admin/permissions/acces
 import { createPostWeeklyReportHandler } from "../../src/app/api/reports/weekly/route";
 import type { AuthenticatedUser } from "../../src/modules/auth/auth-types";
 import { createGetLatestInsightHandler } from "../../src/app/api/insights/latest/route";
+import { createPatchInsightActionHandler } from "../../src/app/api/insights/latest/actions/[actionId]/route";
 import { toInsightSnapshotDto, type InsightSnapshot } from "../../src/modules/insights/insight-types";
 
 test("public chat SSE wire format remains stable", async () => {
@@ -312,6 +313,57 @@ test("latest insight API excludes server-only identity and authorization fields"
     authenticate: async () => ({ id: "private-user", username: "user", displayName: "User", role: "analyst" }),
     getLatest: async () => toInsightSnapshotDto(snapshot),
   })(new NextRequest("http://localhost/api/insights/latest"));
+  const body = await response.json() as { insight: Record<string, unknown> };
+  assert.equal("userId" in body.insight, false);
+  assert.equal("accessRequirements" in body.insight, false);
+  assert.equal("sourceFingerprint" in body.insight, false);
+});
+
+test("latest insight action API preserves authenticated public contract", async () => {
+  const snapshot: InsightSnapshot = {
+    id: "insight-contract",
+    userId: "private-user",
+    sourceQuestion: "Compare stores",
+    sourceIntent: "compare",
+    scope: { storeIds: ["S001"], startDate: "2026-08-01", endDate: "2026-08-07", comparisonLabel: null },
+    headline: "Store performance",
+    findings: [],
+    evidence: [],
+    verificationItems: [],
+    actions: [{
+      id: "action-contract",
+      priority: "P0",
+      title: "Review store performance",
+      ownerRole: "数据分析",
+      verificationMetricCode: "sales_amount",
+      verificationMetricLabel: "Sales amount",
+      completed: true,
+      completedAt: "2026-08-13T01:00:00.000Z",
+    }],
+    accessRequirements: [{ tableName: "store_sales_daily", columns: ["store_id"] }],
+    sourceFingerprint: "private-fingerprint",
+    createdAt: "2026-08-13T00:00:00.000Z",
+    updatedAt: "2026-08-13T01:00:00.000Z",
+  };
+  const response = await createPatchInsightActionHandler({
+    authenticate: async () => ({ id: "private-user", username: "user", displayName: "User", role: "analyst" }),
+    updateAction: async (input) => {
+      assert.deepEqual(input, {
+        userId: "private-user",
+        insightId: "insight-contract",
+        actionId: "action-contract",
+        completed: true,
+      });
+      return toInsightSnapshotDto(snapshot);
+    },
+  })(new NextRequest("http://localhost/api/insights/latest/actions/action-contract", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ insightId: "insight-contract", completed: true }),
+  }), { params: Promise.resolve({ actionId: "action-contract" }) });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
   const body = await response.json() as { insight: Record<string, unknown> };
   assert.equal("userId" in body.insight, false);
   assert.equal("accessRequirements" in body.insight, false);

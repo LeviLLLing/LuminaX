@@ -5,10 +5,11 @@
 2. Governance Agent reviews the raw question.
 3. Business Agent classifies the request and obtains an authorized data scope.
 4. MySQL fixed SQL or a published custom metric executes.
-5. Business or Attribution Agent explains the structured result.
-6. The HTTP adapter emits the existing SSE protocol.
+5. For meaningful analysis intents, Business exposes authorized structured analysis through `onAnalysisReady` before full answer generation.
+6. The insight projection validates deterministic evidence, atomically saves the latest snapshot, and returns a short receipt; projection failure falls back to the complete Business or Attribution answer.
+7. The HTTP adapter emits the existing SSE protocol plus additive insight lifecycle events.
 
-`src/app/api/chat/route.ts` delegates to `handleChatHttpRequest` in `src/modules/chat/chat-http-adapter.ts`. The adapter reads the authenticated user with `authenticateRequest`, calls `chatApplication.execute`, and converts the `ChatResult` into `intent`, `content`, and `[DONE]` SSE events through `streamChatResponse` in `src/modules/chat/sse-response.ts`.
+`src/app/api/chat/route.ts` delegates to `handleChatHttpRequest` in `src/modules/chat/chat-http-adapter.ts`. The adapter reads the authenticated user with `authenticateRequest`, queues live SSE callbacks from `chatApplication.execute`, and emits status, insight, content, and intent payloads in order. The additive `insight` event does not alter existing event payloads.
 
 ## Module Map
 | Module | Responsibility | Public entry points |
@@ -21,6 +22,7 @@
 | metrics | Fixed SQL contracts and result models | SqlMetricQueryExecutor |
 | data-source | JSON, MySQL, SQL Server adapters | SalesDataSource, readDatabaseConfig |
 | reports | Stable report model and renderers | generateWeeklyReportHTML |
+| insights | Authorized analysis projection, deterministic evidence and latest snapshot | InsightApplication, LatestInsightRepository |
 
 - `auth`: `src/modules/auth/auth-application.ts` defines `AuthApplication`; composition exports `authApplication`, while `src/modules/auth/auth-http.ts` exposes `authenticateRequest` for routes.
 - `admin/permissions`: `AccessControl` has `authorizeScope`, `evaluate`, and `filterSalesData`; `permissionAdminApplication` administers users and policies through file-backed storage.
@@ -30,6 +32,18 @@
 - `metrics`: `SqlMetricQueryExecutor` is implemented by `MySqlSqlMetricQueryExecutor`; SQL contracts reside in `src/modules/metrics/sql/mysql-metric-queries.ts`.
 - `data-source`: `SalesDataSource.loadSalesData` has JSON, MySQL, and SQL Server implementations selected by `createSalesDataSource` in `src/modules/data-source/data-source-factory.ts`.
 - `reports`: `WeeklyReportData` is the stable report model. `generateWeeklyReportHTML` and `generateWeeklyReportSummary` are exported from `src/modules/reports/report-engine.ts`; `formatSqlWeeklyReport` renders SQL-backed report results for chat.
+- `insights`: `InsightApplication` composes and validates a projection of an authorized SQL result. `InsightComposer` uses `DEEPSEEK_INSIGHT_MODEL || DEEPSEEK_MODEL || deepseek-v4-flash` for bounded prose only; it has no memory, database access, or metric-calculation responsibility.
+
+## Insight Projection Flow
+1. The Business Agent invokes `onAnalysisReady` with the normalized intent, authorized scope, fixed-SQL result and any single attribution explanation.
+2. `InsightSourceCatalog` and `EvidenceBuilder` build deterministic, traceable sources and evidence from the structured result.
+3. `InsightComposer` selects and describes allowed sources without introducing numeric values.
+4. `InsightValidator` verifies schema, references, quantities, units, text claims and access requirements before any write.
+5. `LatestInsightRepository` atomically replaces one latest snapshot per user. It defaults to `.luminax/latest-insights.json` and can be replaced by a MySQL implementation through the same repository contract.
+6. `GET /api/insights/latest` returns the reauthorized public DTO. `PATCH /api/insights/latest/actions/:actionId` reauthorizes the same exact table, column and store requirements and uses `insightId` for optimistic concurrency.
+7. A successful save emits `insight: updated` and a short chat receipt. A failure emits `insight: failed`, keeps the previous snapshot, and returns the complete chat answer. Request guards prevent stale generations from overwriting newer results.
+
+The internal workbench view ID remains `analysis`, while its user-facing label and content are “洞察与行动”. Overview continues to render operational KPIs and charts; Report continues to render its independently generated weekly report.
 
 ## Agent Topology
 `src/modules/chat/chat-composition.ts` creates the three runtime Agents. Each has its own `DeepSeekChatModel`, its own `InMemoryAgentMemory`, and its own System Prompt; the model names can be independently configured with `DEEPSEEK_GOVERNANCE_MODEL`, `DEEPSEEK_BUSINESS_MODEL`, and `DEEPSEEK_ATTRIBUTION_MODEL`, falling back to `DEEPSEEK_MODEL`.
@@ -59,10 +73,12 @@ MySQL is the active fixed metric executor. The `SalesDataSource` adapter retains
 - `FilePermissionRepository` defaults to `.luminax/access-control.json`; `FileMetricDefinitionRepository` defaults to `.luminax/metric-registry.json`; `FileCredentialRepository` defaults to `.luminax/credentials.json`.
 - `SessionManager` uses `.luminax/session-secret.key` unless a configured session secret or path overrides it. These locations can be overridden through the corresponding `LUMINAX_*_PATH` environment variables.
 - Agent conversation memory is process-local `InMemoryAgentMemory`, capped per session and not persisted to `.luminax/`.
+- Latest insight state is stored by `LatestInsightRepository` in `.luminax/latest-insights.json` by default. The ignored file contains server-only authorization requirements that are removed from public DTOs.
 
 ## Known POC Boundaries
 - DeepSeek transport requires `DEEPSEEK_API_KEY`. Governance rejects when it cannot obtain a valid model decision; Business and Attribution retain their local formatting fallbacks where their code paths provide one.
 - The RAG port is present for Attribution, but its current default is Noop and there is no deployed knowledge store or vector database.
 - `SalesDataSource` still defaults to the JSON adapter when `LUMINAX_DATA_SOURCE` is unset. This serves `/api/data`; it does not replace the MySQL-backed fixed metric executor used by chat.
 - Runtime registries are local file repositories with an in-process write queue, suitable for the local POC rather than multi-instance coordination.
+- Insight composition is stateless. Generation failures preserve the previous valid snapshot, and stale generation or action responses cannot overwrite newer client-visible state.
 - SQL Server remains a retained data-source interface. No full fixed-metric SQL Server parity is asserted.
