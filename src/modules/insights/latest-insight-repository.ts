@@ -170,10 +170,14 @@ export class FileLatestInsightRepository implements LatestInsightRepository {
         await this.fileSystem.rm(temporaryPath, { force: true });
       } catch (cleanupError) {
         if (renameError instanceof Error) {
-          Object.defineProperty(renameError, "cleanupError", {
-            configurable: true,
-            value: cleanupError,
-          });
+          try {
+            Object.defineProperty(renameError, "cleanupError", {
+              configurable: true,
+              value: cleanupError,
+            });
+          } catch {
+            // Cleanup metadata must never replace the original rename failure.
+          }
         }
       }
       throw renameError;

@@ -272,6 +272,28 @@ test("failed temporary cleanup preserves the rename failure", async () => {
   });
 });
 
+test("frozen rename errors survive failed temporary cleanup", async () => {
+  const directory = await createTemporaryDirectory();
+  const renameFailure = Object.freeze(new Error("rename failed"));
+  const repository = new FileLatestInsightRepository(
+    join(directory, "latest.json"),
+    createFileSystem({
+      rename: async () => {
+        throw renameFailure;
+      },
+      rm: async () => {
+        throw new Error("cleanup failed");
+      },
+    })
+  );
+
+  await assert.rejects(repository.replaceForUser(createSnapshot()), (error) => {
+    assert.equal(error, renameFailure);
+    assert.equal((error as Error).message, "rename failed");
+    return true;
+  });
+});
+
 test("the write queue continues after a rejected write", async () => {
   const file = await createFileContaining("{broken");
   const repository = new FileLatestInsightRepository(file);
