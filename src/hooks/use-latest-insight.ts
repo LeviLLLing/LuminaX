@@ -49,6 +49,7 @@ export function createLatestInsightStateController(
     generationStatus: "idle",
   };
   let reloadSequence = 0;
+  const actionSequences = new Map<string, number>();
   const listeners = new Set<(state: LatestInsightState) => void>();
 
   const setState = (patch: Partial<LatestInsightState>) => {
@@ -69,7 +70,7 @@ export function createLatestInsightStateController(
       if (sequence === reloadSequence) {
         setState({
           error: messageOf(error),
-          ...(error instanceof InsightClientError && error.status === 403
+          ...(error instanceof InsightClientError && [401, 403].includes(error.status)
             ? { insight: null }
             : {}),
         });
@@ -120,6 +121,8 @@ export function createLatestInsightStateController(
   ): Promise<void> => {
     const previous = state.insight;
     if (!previous) return;
+    const sequence = (actionSequences.get(actionId) ?? 0) + 1;
+    actionSequences.set(actionId, sequence);
     setState({
       error: null,
       insight: {
@@ -141,8 +144,9 @@ export function createLatestInsightStateController(
         actionId,
         completed,
       });
-      setState({ insight });
+      if (actionSequences.get(actionId) === sequence) setState({ insight });
     } catch (error) {
+      if (actionSequences.get(actionId) !== sequence) return;
       setState({ insight: previous, error: messageOf(error) });
       if (error instanceof InsightClientError && error.status === 409) {
         try {

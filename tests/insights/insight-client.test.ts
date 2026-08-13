@@ -301,23 +301,47 @@ test("action update rolls back optimistically and performs exactly one reload on
   assert.equal(fetchCount, 1);
 });
 
-test("permission failure clears a previously visible insight snapshot", async () => {
-  let authorized = true;
+test("authentication and permission failures clear a previously visible snapshot", async () => {
+  for (const status of [401, 403]) {
+    let authorized = true;
+    const controller = createLatestInsightStateController({
+      fetchLatest: async () => {
+        if (!authorized) throw new InsightClientError(status, "洞察权限已失效");
+        return insight;
+      },
+      updateAction: async () => insight,
+      now: () => "2026-08-13T01:00:00.000Z",
+    });
+
+    await controller.reload();
+    authorized = false;
+    await assert.rejects(controller.reload(), InsightClientError);
+
+    assert.equal(controller.getState().insight, null);
+    assert.equal(controller.getState().error, "洞察权限已失效");
+  }
+});
+
+test("a stale action response cannot overwrite the latest toggle", async () => {
+  const pending: Array<(value: InsightSnapshotDto) => void> = [];
   const controller = createLatestInsightStateController({
-    fetchLatest: async () => {
-      if (!authorized) throw new InsightClientError(403, "洞察权限已失效");
-      return insight;
-    },
-    updateAction: async () => insight,
+    fetchLatest: async () => insight,
+    updateAction: () => new Promise((resolve) => pending.push(resolve)),
     now: () => "2026-08-13T01:00:00.000Z",
   });
-
   await controller.reload();
-  authorized = false;
-  await assert.rejects(controller.reload(), InsightClientError);
 
-  assert.equal(controller.getState().insight, null);
-  assert.equal(controller.getState().error, "洞察权限已失效");
+  const markComplete = controller.toggleAction("a1", true);
+  const markIncomplete = controller.toggleAction("a1", false);
+  pending[1](insight);
+  await markIncomplete;
+  pending[0]({
+    ...insight,
+    actions: [{ ...insight.actions[0], completed: true, completedAt: "2026-08-13T01:00:00.000Z" }],
+  });
+  await markComplete;
+
+  assert.equal(controller.getState().insight?.actions[0].completed, false);
 });
 
 interface ChartOption {
