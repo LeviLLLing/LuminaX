@@ -86,9 +86,17 @@ export function normalizeInsightSnapshotDto(value: unknown): InsightSnapshotDto 
 
   for (const finding of findings) {
     if (finding.evidenceIds.some((id) => !evidenceIds.has(id))) throw invalidDto();
+    for (const evidenceId of finding.evidenceIds) {
+      const linkedEvidence = evidence.find((item) => item.id === evidenceId);
+      if (!linkedEvidence?.supportsFindingIds.includes(finding.id)) throw invalidDto();
+    }
   }
   for (const item of evidence) {
     if (item.supportsFindingIds.some((id) => !findingIds.has(id))) throw invalidDto();
+    for (const findingId of item.supportsFindingIds) {
+      const linkedFinding = findings.find((finding) => finding.id === findingId);
+      if (!linkedFinding?.evidenceIds.includes(item.id)) throw invalidDto();
+    }
   }
 
   return {

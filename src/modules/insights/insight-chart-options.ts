@@ -33,12 +33,34 @@ function buildHorizontalOption(evidence: InsightEvidence): EChartsOption {
     grid: { left: 96, right: 56, top: 16, bottom: 28, containLabel: true },
     xAxis: { type: "value", splitLine: { lineStyle: { color: COLORS.grid } } },
     yAxis: { type: "category", data: rows.map((row) => row.label), axisTick: { show: false } },
-    series: [{
-      type: "bar",
-      data: rows.map(dataItem),
-      label: { show: true, position: "right", formatter: `{c}${evidence.unit}` },
-      markLine: baselineMarkLine(rows, evidence.baselineLabel, "xAxis"),
-    }],
+    series: [
+      {
+        type: "bar",
+        data: rows.map(dataItem),
+        label: {
+          show: true,
+          position: "right",
+          formatter: valueFormatter(evidence.unit),
+        },
+      },
+      {
+        name: evidence.baselineLabel,
+        type: "scatter",
+        symbol: "rect",
+        symbolSize: [2, 18],
+        itemStyle: { color: COLORS.baseline },
+        data: rows.flatMap((row) =>
+          row.baseline === undefined
+            ? []
+            : [{ value: [row.baseline, row.label] }]
+        ),
+        label: {
+          show: true,
+          position: "right",
+          formatter: valueFormatter(evidence.unit),
+        },
+      },
+    ],
   };
 }
 
@@ -54,13 +76,36 @@ function buildTimelineOption(evidence: InsightEvidence): EChartsOption {
       axisLabel: { interval: 0 },
     },
     yAxis: { type: "value", splitLine: { lineStyle: { color: COLORS.grid } } },
-    series: [{
-      type: evidence.type === "anomaly_dates" ? "line" : "bar",
-      data: rows.map(dataItem),
-      label: { show: true, position: "top", formatter: `{c}${evidence.unit}` },
-      lineStyle: evidence.type === "anomaly_dates" ? { color: COLORS.neutral } : undefined,
-      markLine: baselineMarkLine(rows, evidence.baselineLabel, "yAxis"),
-    }],
+    series: [
+      {
+        type: evidence.type === "anomaly_dates" ? "line" : "bar",
+        data: rows.map(dataItem),
+        label: {
+          show: true,
+          position: "top",
+          formatter: valueFormatter(evidence.unit),
+        },
+        lineStyle:
+          evidence.type === "anomaly_dates"
+            ? { color: COLORS.neutral }
+            : undefined,
+      },
+      {
+        name: evidence.baselineLabel,
+        type: "line",
+        data: rows.map((row) => row.baseline ?? null),
+        connectNulls: false,
+        symbol: "circle",
+        symbolSize: 6,
+        itemStyle: { color: COLORS.baseline },
+        lineStyle: { type: "dashed", color: COLORS.baseline },
+        label: {
+          show: true,
+          position: "top",
+          formatter: valueFormatter(evidence.unit),
+        },
+      },
+    ],
   };
 }
 
@@ -68,20 +113,28 @@ function dataItem(row: InsightEvidenceSeries) {
   return { value: row.value, itemStyle: { color: COLORS[row.direction] } };
 }
 
-function baselineMarkLine(
-  rows: InsightEvidenceSeries[],
-  label: string,
-  axis: "xAxis" | "yAxis"
-) {
-  const baselines = rows
-    .map((row) => row.baseline)
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-  if (baselines.length === 0) return undefined;
-  return {
-    silent: true,
-    symbol: "none",
-    lineStyle: { type: "dashed" as const, color: COLORS.baseline },
-    label: { show: true, formatter: label },
-    data: [{ [axis]: baselines[0] }],
-  };
+function valueFormatter(unit: string) {
+  return (params: { value: unknown }) => formatInsightValue(
+    Array.isArray(params.value) ? params.value[0] : params.value,
+    unit
+  );
+}
+
+export function formatInsightValue(value: unknown, unit: string): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+  if (unit === "percentage" || unit === "%") {
+    return `${formatNumber(value, 1)}%`;
+  }
+  if (unit === "currency") return `¥${formatNumber(value, 2)}`;
+  if (unit === "count") {
+    return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(value);
+  }
+  if (unit === "ratio") return formatNumber(value, 2);
+  return unit ? `${formatNumber(value, 2)} ${unit}` : formatNumber(value, 2);
+}
+
+function formatNumber(value: number, maximumFractionDigits: number): string {
+  return new Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits,
+  }).format(value);
 }

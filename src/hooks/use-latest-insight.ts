@@ -1,110 +1,181 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   fetchLatestInsight,
   InsightClientError,
   updateLatestInsightAction,
+  type UpdateLatestInsightActionInput,
 } from "@/modules/insights/insight-client";
-import type { InsightSnapshotDto, InsightStreamEvent } from "@/modules/insights/insight-types";
+import type {
+  InsightSnapshotDto,
+  InsightStreamEvent,
+} from "@/modules/insights/insight-types";
 
-export interface UseLatestInsightResult {
+export interface LatestInsightState {
   insight: InsightSnapshotDto | null;
   isLoading: boolean;
   error: string | null;
   generationStatus: "idle" | "generating" | "failed";
+}
+
+export interface UseLatestInsightResult extends LatestInsightState {
   reload(): Promise<InsightSnapshotDto | null>;
   handleStreamEvent(event: InsightStreamEvent): Promise<InsightSnapshotDto | null>;
   toggleAction(actionId: string, completed: boolean): Promise<void>;
 }
 
-export function useLatestInsight(): UseLatestInsightResult {
-  const [insight, setInsight] = useState<InsightSnapshotDto | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [generationStatus, setGenerationStatus] = useState<"idle" | "generating" | "failed">("idle");
-  const insightRef = useRef<InsightSnapshotDto | null>(null);
-  const loadSequence = useRef(0);
+interface LatestInsightStateDependencies {
+  fetchLatest(): Promise<InsightSnapshotDto | null>;
+  updateAction(input: UpdateLatestInsightActionInput): Promise<InsightSnapshotDto>;
+  now(): string;
+}
 
-  const commitInsight = useCallback((next: InsightSnapshotDto | null) => {
-    insightRef.current = next;
-    setInsight(next);
-  }, []);
+export interface LatestInsightStateController {
+  getState(): LatestInsightState;
+  subscribe(listener: (state: LatestInsightState) => void): () => void;
+  reload(): Promise<InsightSnapshotDto | null>;
+  handleStreamEvent(event: InsightStreamEvent): Promise<InsightSnapshotDto | null>;
+  toggleAction(actionId: string, completed: boolean): Promise<void>;
+}
 
-  const reload = useCallback(async () => {
-    const sequence = ++loadSequence.current;
-    setIsLoading(true);
+export function createLatestInsightStateController(
+  dependencies: LatestInsightStateDependencies
+): LatestInsightStateController {
+  let state: LatestInsightState = {
+    insight: null,
+    isLoading: true,
+    error: null,
+    generationStatus: "idle",
+  };
+  let reloadSequence = 0;
+  const listeners = new Set<(state: LatestInsightState) => void>();
+
+  const setState = (patch: Partial<LatestInsightState>) => {
+    state = { ...state, ...patch };
+    listeners.forEach((listener) => listener(state));
+  };
+
+  const reload = async (): Promise<InsightSnapshotDto | null> => {
+    const sequence = ++reloadSequence;
+    setState({ isLoading: true });
     try {
-      const next = await fetchLatestInsight();
-      if (sequence === loadSequence.current) {
-        commitInsight(next);
-        setError(null);
+      const insight = await dependencies.fetchLatest();
+      if (sequence === reloadSequence) {
+        setState({ insight, error: null });
       }
-      return next;
-    } catch (loadError) {
-      if (sequence === loadSequence.current) setError(messageOf(loadError));
-      throw loadError;
+      return insight;
+    } catch (error) {
+      if (sequence === reloadSequence) setState({ error: messageOf(error) });
+      throw error;
     } finally {
-      if (sequence === loadSequence.current) setIsLoading(false);
+      if (sequence === reloadSequence) setState({ isLoading: false });
     }
-  }, [commitInsight]);
+  };
 
-  useEffect(() => {
-    void reload().catch(() => undefined);
-  }, [reload]);
-
-  const handleStreamEvent = useCallback(async (event: InsightStreamEvent) => {
+  const handleStreamEvent = async (
+    event: InsightStreamEvent
+  ): Promise<InsightSnapshotDto | null> => {
     if (event.status === "generating") {
-      setGenerationStatus("generating");
-      setError(null);
-      return insightRef.current;
+      setState({ generationStatus: "generating", error: null });
+      return state.insight;
     }
     if (event.status === "failed") {
-      setGenerationStatus("failed");
-      setError("洞察更新失败，当前洞察仍可继续使用");
-      return insightRef.current;
+      setState({
+        generationStatus: "failed",
+        error: "洞察更新失败，当前洞察仍可继续使用",
+      });
+      return state.insight;
     }
 
     try {
-      const next = await reload();
-      if (next?.id === event.insightId) {
-        setGenerationStatus("idle");
-        setError(null);
+      const insight = await reload();
+      if (state.insight?.id === event.insightId) {
+        setState({ generationStatus: "idle", error: null });
       }
-      return next;
+      return insight;
     } catch {
-      setGenerationStatus("failed");
-      return insightRef.current;
+      setState({ generationStatus: "failed" });
+      return state.insight;
     }
-  }, [reload]);
+  };
 
-  const toggleAction = useCallback(async (actionId: string, completed: boolean) => {
-    const previous = insightRef.current;
+  const toggleAction = async (
+    actionId: string,
+    completed: boolean
+  ): Promise<void> => {
+    const previous = state.insight;
     if (!previous) return;
-    const optimistic: InsightSnapshotDto = {
-      ...previous,
-      actions: previous.actions.map((action) => action.id === actionId
-        ? { ...action, completed, completedAt: completed ? new Date().toISOString() : null }
-        : action),
-    };
-    commitInsight(optimistic);
-    setError(null);
+    setState({
+      error: null,
+      insight: {
+        ...previous,
+        actions: previous.actions.map((action) =>
+          action.id === actionId
+            ? {
+                ...action,
+                completed,
+                completedAt: completed ? dependencies.now() : null,
+              }
+            : action
+        ),
+      },
+    });
     try {
-      commitInsight(await updateLatestInsightAction({ insightId: previous.id, actionId, completed }));
-    } catch (updateError) {
-      commitInsight(previous);
-      setError(messageOf(updateError));
-      if (updateError instanceof InsightClientError && updateError.status === 409) {
+      const insight = await dependencies.updateAction({
+        insightId: previous.id,
+        actionId,
+        completed,
+      });
+      setState({ insight });
+    } catch (error) {
+      setState({ insight: previous, error: messageOf(error) });
+      if (error instanceof InsightClientError && error.status === 409) {
         try {
           await reload();
         } catch {
-          // The optimistic state has already been rolled back.
+          // Rollback remains visible when refreshing the latest snapshot fails.
         }
       }
     }
-  }, [commitInsight, reload]);
+  };
 
-  return { insight, isLoading, error, generationStatus, reload, handleStreamEvent, toggleAction };
+  return {
+    getState: () => state,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    reload,
+    handleStreamEvent,
+    toggleAction,
+  };
+}
+
+export function useLatestInsight(): UseLatestInsightResult {
+  const [controller] = useState(() =>
+    createLatestInsightStateController({
+      fetchLatest: fetchLatestInsight,
+      updateAction: updateLatestInsightAction,
+      now: () => new Date().toISOString(),
+    })
+  );
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getState,
+    controller.getState
+  );
+
+  useEffect(() => {
+    void controller.reload().catch(() => undefined);
+  }, [controller]);
+
+  return {
+    ...state,
+    reload: controller.reload,
+    handleStreamEvent: controller.handleStreamEvent,
+    toggleAction: controller.toggleAction,
+  };
 }
 
 function messageOf(error: unknown): string {

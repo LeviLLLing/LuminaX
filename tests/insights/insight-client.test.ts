@@ -9,6 +9,10 @@ import {
 import { buildInsightEvidenceChartOption } from "../../src/modules/insights/insight-chart-options";
 import type { InsightSnapshotDto } from "../../src/modules/insights/insight-types";
 import { isInsightScopeActive } from "../../src/modules/workbench/workbench-presentation";
+import {
+  createLatestInsightStateController,
+  type LatestInsightState,
+} from "../../src/hooks/use-latest-insight";
 
 const insight: InsightSnapshotDto = {
   id: "i1",
@@ -65,6 +69,8 @@ test("DTO normalizer rejects malformed dates, numbers and cross references", () 
   assert.throws(() => normalizeInsightSnapshotDto({ ...insight, actions: [{ ...insight.actions[0], completed: false, completedAt: "2026-08-13T01:00:00.000Z" }] }), InsightClientError);
   assert.throws(() => normalizeInsightSnapshotDto({ ...insight, actions: [insight.actions[0], insight.actions[0]] }), InsightClientError);
   assert.throws(() => normalizeInsightSnapshotDto({ ...insight, evidence: [{ ...insight.evidence[0], series: [insight.evidence[0].series[0], insight.evidence[0].series[0]] }] }), InsightClientError);
+  assert.throws(() => normalizeInsightSnapshotDto({ ...insight, findings: [{ ...insight.findings[0], evidenceIds: [] }] }), InsightClientError);
+  assert.throws(() => normalizeInsightSnapshotDto({ ...insight, evidence: [{ ...insight.evidence[0], supportsFindingIds: [] }] }), InsightClientError);
   const normalized = normalizeInsightSnapshotDto({ ...insight, userId: "ignored", sourceFingerprint: "ignored" });
   assert.equal("userId" in normalized, false);
   assert.equal("sourceFingerprint" in normalized, false);
@@ -76,16 +82,170 @@ test("insight scope comparison ignores store order but requires exact dates and 
   assert.equal(isInsightScopeActive({ storeIds: ["S001", "S002"], startDate: "2026-08-02", endDate: "2026-08-07" }, insight.scope), false);
 });
 
-test("evidence chart options contain direct labels and a dashed baseline", () => {
-  const option = buildInsightEvidenceChartOption(insight.evidence[0]) as {
+test("evidence chart options format internal units as professional display values", () => {
+  const formatted = (["percentage", "currency", "count", "ratio"] as const).map((unit) => {
+    const option = buildInsightEvidenceChartOption({
+      ...insight.evidence[0],
+      unit,
+      series: [{ ...insight.evidence[0].series[0], value: 12345.67, baseline: undefined }],
+    }) as ChartOption;
+    return callFormatter(option.series[0].label?.formatter, 12345.67);
+  });
+  assert.deepEqual(formatted, ["12,345.7%", "¥12,345.67", "12,346", "12,345.67"]);
+  assert.ok(formatted.every((value) => !/percentage|currency|count|ratio/.test(value)));
+});
+
+test("horizontal evidence aligns every heterogeneous baseline with its sorted category", () => {
+  const option = buildInsightEvidenceChartOption({
+    ...insight.evidence[0],
+    unit: "currency",
+    series: [
+      { key: "small", label: "Small", value: 8, baseline: 9, direction: "positive" },
+      { key: "large", label: "Large", value: -12, baseline: 15, direction: "negative" },
+    ],
+  }) as ChartOption;
+  const categories = (option.yAxis as { data: string[] }).data;
+  const baselines = option.series[1].data as Array<{ value: [number, string] }>;
+  assert.deepEqual(categories, ["Large", "Small"]);
+  assert.deepEqual(baselines.map((item) => item.value), [[15, "Large"], [9, "Small"]]);
+  assert.deepEqual(baselines.map((item) => callFormatter(option.series[1].label?.formatter, item.value)), ["¥15", "¥9"]);
+});
+
+test("timeline evidence preserves every point baseline in deterministic key order", () => {
+  const option = buildInsightEvidenceChartOption({
+    ...insight.evidence[0],
+    type: "period_variance",
+    unit: "count",
+    series: [
+      { key: "2026-08-02", label: "08-02", value: 80, baseline: 90, direction: "negative" },
+      { key: "2026-08-01", label: "08-01", value: 120, baseline: 100, direction: "positive" },
+    ],
+  }) as ChartOption;
+  assert.deepEqual((option.xAxis as { data: string[] }).data, ["08-01", "08-02"]);
+  assert.deepEqual(option.series[1].data, [100, 90]);
+  assert.deepEqual([100, 90].map((value) => callFormatter(option.series[1].label?.formatter, value)), ["100", "90"]);
+});
+
+test("evidence chart options retain direct labels and reserved grid space", () => {
+  const option = buildInsightEvidenceChartOption(insight.evidence[0]) as ChartOption & {
     grid: { left: number; right: number };
-    series: Array<{ label?: { show?: boolean; position?: string }; markLine?: { lineStyle?: { type?: string }; data?: Array<Record<string, number>> }; data?: Array<{ value: number }> }>;
   };
   assert.ok(option.grid.left >= 96);
   assert.ok(option.grid.right >= 56);
   assert.equal(option.series[0].label?.show, true);
   assert.equal(option.series[0].label?.position, "right");
-  assert.equal(option.series[0].markLine?.lineStyle?.type, "dashed");
-  assert.deepEqual(option.series[0].markLine?.data, [{ xAxis: 0 }]);
-  assert.deepEqual(option.series[0].data?.map((item) => item.value), [-12, 8]);
+  assert.deepEqual((option.series[0].data as Array<{ value: number }>).map((item) => item.value), [-12, 8]);
 });
+
+test("latest insight state preserves stale content through generating and failed events", async () => {
+  const states: LatestInsightState[] = [];
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => insight,
+    updateAction: async () => insight,
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  controller.subscribe((state) => states.push(state));
+  await controller.reload();
+  await controller.handleStreamEvent({ status: "generating" });
+  assert.equal(controller.getState().insight?.id, "i1");
+  assert.equal(controller.getState().generationStatus, "generating");
+  await controller.handleStreamEvent({ status: "failed" });
+  assert.equal(controller.getState().insight?.id, "i1");
+  assert.equal(controller.getState().generationStatus, "failed");
+  assert.match(controller.getState().error || "", /仍可继续使用/);
+  assert.ok(states.length >= 3);
+});
+
+test("updated event clears generation state only after its matching snapshot refreshes", async () => {
+  const updated = { ...insight, id: "i2", updatedAt: "2026-08-13T01:00:00.000Z" };
+  let next: InsightSnapshotDto = insight;
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => next,
+    updateAction: async () => next,
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  await controller.reload();
+  await controller.handleStreamEvent({ status: "generating" });
+  await controller.handleStreamEvent({ status: "updated", insightId: "i2", findingCount: 1, actionCount: 1 });
+  assert.equal(controller.getState().generationStatus, "generating");
+  next = updated;
+  await controller.handleStreamEvent({ status: "updated", insightId: "i2", findingCount: 1, actionCount: 1 });
+  assert.equal(controller.getState().insight?.id, "i2");
+  assert.equal(controller.getState().generationStatus, "idle");
+});
+
+test("out-of-order reload completion cannot replace newer insight state", async () => {
+  const pending: Array<(value: InsightSnapshotDto) => void> = [];
+  const controller = createLatestInsightStateController({
+    fetchLatest: () => new Promise((resolve) => pending.push(resolve)),
+    updateAction: async () => insight,
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  const oldReload = controller.reload();
+  const newReload = controller.reload();
+  pending[1]({ ...insight, id: "new" });
+  await newReload;
+  pending[0]({ ...insight, id: "old" });
+  await oldReload;
+  assert.equal(controller.getState().insight?.id, "new");
+  assert.equal(controller.getState().isLoading, false);
+});
+
+test("stale matching reload cannot clear generation status after a newer snapshot wins", async () => {
+  const pending: Array<(value: InsightSnapshotDto) => void> = [];
+  const controller = createLatestInsightStateController({
+    fetchLatest: () => new Promise((resolve) => pending.push(resolve)),
+    updateAction: async () => insight,
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  await controller.handleStreamEvent({ status: "generating" });
+  const staleUpdated = controller.handleStreamEvent({
+    status: "updated",
+    insightId: "stale-match",
+    findingCount: 1,
+    actionCount: 1,
+  });
+  const newerReload = controller.reload();
+  pending[1]({ ...insight, id: "newer" });
+  await newerReload;
+  pending[0]({ ...insight, id: "stale-match" });
+  await staleUpdated;
+  assert.equal(controller.getState().insight?.id, "newer");
+  assert.equal(controller.getState().generationStatus, "generating");
+});
+
+test("action update rolls back optimistically and performs exactly one reload on 409", async () => {
+  let fetchCount = 0;
+  const visible: boolean[] = [];
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => {
+      fetchCount += 1;
+      return insight;
+    },
+    updateAction: async () => {
+      throw new InsightClientError(409, "stale");
+    },
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  controller.subscribe((state) => visible.push(state.insight?.actions[0].completed ?? false));
+  await controller.reload();
+  fetchCount = 0;
+  await controller.toggleAction("a1", true);
+  assert.ok(visible.includes(true));
+  assert.equal(controller.getState().insight?.actions[0].completed, false);
+  assert.equal(fetchCount, 1);
+});
+
+interface ChartOption {
+  xAxis?: unknown;
+  yAxis?: unknown;
+  series: Array<{
+    data?: unknown;
+    label?: { show?: boolean; position?: string; formatter?: unknown };
+  }>;
+}
+
+function callFormatter(formatter: unknown, value: number | [number, string]): string {
+  assert.equal(typeof formatter, "function");
+  return (formatter as (params: { value: number | [number, string] }) => string)({ value });
+}
