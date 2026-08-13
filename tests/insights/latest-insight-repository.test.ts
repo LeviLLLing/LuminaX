@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   FileLatestInsightRepository,
   InsightConflictError,
+  type LatestInsightFileSystem,
   InsightNotFoundError,
   InsightRepositoryCorruptError,
 } from "../../src/modules/insights/latest-insight-repository";
@@ -40,6 +49,32 @@ test("repository replaces and restores one latest snapshot per user", async () =
   assert.equal(
     (await new FileLatestInsightRepository(file).findByUserId("u2"))?.id,
     "other"
+  );
+});
+
+test("repository serializes concurrent replacements without losing users", async () => {
+  const file = join(await createTemporaryDirectory(), "latest.json");
+  const repository = new FileLatestInsightRepository(file);
+
+  await Promise.all(
+    ["u1", "u2", "u3"].map((userId) =>
+      repository.replaceForUser(
+        createSnapshot({
+          id: `insight-${userId}`,
+          sourceFingerprint: `fingerprint-${userId}`,
+          userId,
+        })
+      )
+    )
+  );
+
+  assert.deepEqual(
+    await Promise.all(
+      ["u1", "u2", "u3"].map(async (userId) =>
+        (await repository.findByUserId(userId))?.id
+      )
+    ),
+    ["insight-u1", "insight-u2", "insight-u3"]
   );
 });
 
@@ -143,6 +178,100 @@ test("corrupt JSON is reported and never overwritten", async () => {
   assert.equal(await readFile(file, "utf8"), "{broken");
 });
 
+test("invalid nested registry data is reported and never overwritten", async () => {
+  const invalidSnapshots = [
+    (snapshot: Record<string, unknown>) => {
+      snapshot.findings = [null];
+    },
+    (snapshot: Record<string, unknown>) => {
+      snapshot.accessRequirements = [{}];
+    },
+    (snapshot: Record<string, unknown>) => {
+      (snapshot.findings as Array<Record<string, unknown>>)[0].severity = "urgent";
+    },
+    (snapshot: Record<string, unknown>) => {
+      snapshot.updatedAt = "not-a-timestamp";
+    },
+  ];
+
+  for (const makeInvalid of invalidSnapshots) {
+    const snapshot = structuredClone(createSnapshot()) as unknown as Record<
+      string,
+      unknown
+    >;
+    makeInvalid(snapshot);
+    const contents = JSON.stringify({ version: 1, insights: { u1: snapshot } });
+    const file = await createFileContaining(contents);
+    const repository = new FileLatestInsightRepository(file);
+
+    await assert.rejects(
+      repository.findByUserId("u1"),
+      InsightRepositoryCorruptError
+    );
+    await assert.rejects(
+      repository.replaceForUser(createSnapshot({ id: "new", userId: "u1" })),
+      InsightRepositoryCorruptError
+    );
+    assert.equal(await readFile(file, "utf8"), contents);
+  }
+});
+
+test("non-finite numeric evidence in persisted JSON is reported as corrupt", async () => {
+  const snapshot = createSnapshot();
+  const contents = JSON.stringify({ version: 1, insights: { u1: snapshot } }).replace(
+    '"value":12.4',
+    '"value":1e9999'
+  );
+  const file = await createFileContaining(contents);
+
+  await assert.rejects(
+    new FileLatestInsightRepository(file).findByUserId("u1"),
+    InsightRepositoryCorruptError
+  );
+  assert.equal(await readFile(file, "utf8"), contents);
+});
+
+test("failed rename removes the temporary registry file", async () => {
+  const directory = await createTemporaryDirectory();
+  const renameFailure = new Error("rename failed");
+  const repository = new FileLatestInsightRepository(
+    join(directory, "latest.json"),
+    createFileSystem({
+      rename: async () => {
+        throw renameFailure;
+      },
+    })
+  );
+
+  await assert.rejects(
+    repository.replaceForUser(createSnapshot()),
+    renameFailure
+  );
+  assert.deepEqual(await readdir(directory), []);
+});
+
+test("failed temporary cleanup preserves the rename failure", async () => {
+  const directory = await createTemporaryDirectory();
+  const renameFailure = new Error("rename failed");
+  const cleanupFailure = new Error("cleanup failed");
+  const repository = new FileLatestInsightRepository(
+    join(directory, "latest.json"),
+    createFileSystem({
+      rename: async () => {
+        throw renameFailure;
+      },
+      rm: async () => {
+        throw cleanupFailure;
+      },
+    })
+  );
+
+  await assert.rejects(repository.replaceForUser(createSnapshot()), (error) => {
+    assert.equal(error, renameFailure);
+    return true;
+  });
+});
+
 test("the write queue continues after a rejected write", async () => {
   const file = await createFileContaining("{broken");
   const repository = new FileLatestInsightRepository(file);
@@ -221,11 +350,51 @@ function createSnapshot(
       comparisonLabel: "previous period",
     },
     headline: "Orders declined",
-    findings: [],
-    evidence: [],
-    verificationItems: [],
+    findings: [
+      {
+        id: "finding-1",
+        title: "Order decline",
+        summary: "Orders fell compared with the previous period.",
+        severity: "high",
+        confidence: "high",
+        subjectIds: ["S001"],
+        metricCode: "orders",
+        value: -12.4,
+        unit: "%",
+        displayValue: "-12.4%",
+        evidenceIds: ["evidence-1"],
+      },
+    ],
+    evidence: [
+      {
+        id: "evidence-1",
+        type: "period_variance",
+        title: "Period variance",
+        supportsFindingIds: ["finding-1"],
+        unit: "%",
+        baselineLabel: "Previous period",
+        series: [
+          {
+            key: "current",
+            label: "Current",
+            value: 12.4,
+            baseline: 0,
+            direction: "negative",
+          },
+        ],
+        interpretation: "Orders were below baseline.",
+      },
+    ],
+    verificationItems: [
+      {
+        id: "verification-1",
+        observedFact: "Orders declined.",
+        hypothesis: "A channel underperformed.",
+        requiredCheck: "Check channel contribution.",
+      },
+    ],
     actions: [createAction()],
-    accessRequirements: [],
+    accessRequirements: [{ tableName: "sales", columns: ["orders"] }],
     sourceFingerprint: "fingerprint-1",
     createdAt: "2026-08-13T00:00:00.000Z",
     updatedAt: "2026-08-13T00:00:00.000Z",
@@ -238,10 +407,23 @@ function createAction(): InsightAction {
     id: "action-1",
     priority: "P1",
     title: "Review channel performance",
-    ownerRole: "manager" as InsightAction["ownerRole"],
+    ownerRole: "\u9356\u54c4\u7159\u7f01\u5fd5\u608a" as InsightAction["ownerRole"],
     verificationMetricCode: "orders",
     verificationMetricLabel: "Orders",
     completed: false,
     completedAt: null,
+  };
+}
+
+function createFileSystem(
+  overrides: Partial<LatestInsightFileSystem>
+): LatestInsightFileSystem {
+  return {
+    mkdir,
+    readFile,
+    writeFile,
+    rename,
+    rm,
+    ...overrides,
   };
 }
