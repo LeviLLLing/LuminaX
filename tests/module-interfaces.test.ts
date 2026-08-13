@@ -9,3 +9,4 @@ import "./docs/documentation.test";
 import "./reports/reports.test";
 import "./workbench/workbench.test";
 import "./workbench/workbench-client.test";
+import "./insights/insight-types.test";
