@@ -105,7 +105,7 @@ function createInsightSnapshotFixture(): InsightSnapshot {
         id: "action-1",
         priority: "P1",
         title: "Review channel performance",
-        ownerRole: "杩愯惀",
+        ownerRole: "运营",
         verificationMetricCode: "orders",
         verificationMetricLabel: "Orders",
         completed: false,

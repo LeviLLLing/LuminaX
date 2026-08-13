@@ -688,7 +688,7 @@ export const COMPARE_SUMMARY_SQL = `
     COALESCE(targets.total_target, 0) AS totalTarget,
     CASE
       WHEN COALESCE(targets.total_target, 0) > 0
-      THEN ROUND(sales.total_sales / targets.total_target * 100, 1)
+      THEN ROUND(COALESCE(sales.total_sales, 0) / targets.total_target * 100, 1)
       ELSE 0
     END AS achievementRate,
     COALESCE(sales.total_orders, 0) AS totalOrders,
@@ -701,7 +701,7 @@ export const COMPARE_SUMMARY_SQL = `
     COALESCE(refunds.total_cancelled, 0) AS totalCancelled,
     CASE
       WHEN COALESCE(sales.total_sales, 0) > 0
-      THEN ROUND(refunds.total_refund / sales.total_sales * 100, 2)
+      THEN ROUND(COALESCE(refunds.total_refund, 0) / sales.total_sales * 100, 2)
       ELSE 0
     END AS refundRate
   FROM requested_stores AS requested

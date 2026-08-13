@@ -25,7 +25,7 @@ export interface InsightComposer {
 const severities: readonly InsightSeverity[] = ["high", "medium", "low", "positive"];
 const confidences: readonly InsightConfidence[] = ["high", "medium", "needs_verification"];
 const priorities = ["P0", "P1", "P2"] as const;
-const ownerRoles: readonly InsightOwnerRole[] = ["鍖哄煙缁忕悊", "搴楅暱", "杩愯惀", "璐㈠姟", "鏁版嵁鍒嗘瀽"];
+const ownerRoles: readonly InsightOwnerRole[] = ["区域经理", "店长", "运营", "财务", "数据分析"];
 
 export function createInsightComposer({ model }: { model: AgentModel }): InsightComposer {
   return {

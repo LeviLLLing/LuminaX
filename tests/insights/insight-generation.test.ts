@@ -11,6 +11,7 @@ import {
 import { buildInsightEvidence } from "../../src/modules/insights/evidence-builder";
 import { createInsightComposer } from "../../src/modules/insights/insight-composer";
 import {
+  containsNumericClaim,
   InsightValidationError,
   materializeInsightSnapshot,
 } from "../../src/modules/insights/insight-validator";
@@ -220,14 +221,26 @@ test("compare uses numeric SQL rates in evidence and presentation", () => {
 });
 
 test("compare SQL returns numeric rate aliases without presentation strings", () => {
-  for (const alias of ["achievementRate", "refundRate"]) {
+  const expectedNumerators = {
+    achievementRate: /ROUND\(\s*COALESCE\(sales\.total_sales,\s*0\)\s*\/\s*targets\.total_target\s*\*\s*100,\s*1\s*\)/i,
+    refundRate: /ROUND\(\s*COALESCE\(refunds\.total_refund,\s*0\)\s*\/\s*sales\.total_sales\s*\*\s*100,\s*2\s*\)/i,
+  } as const;
+
+  for (const alias of ["achievementRate", "refundRate"] as const) {
     const match = COMPARE_SUMMARY_SQL.match(
       new RegExp(`CASE([\\s\\S]*?)END\\s+AS\\s+${alias}`, "i")
     );
     assert.ok(match, `missing CASE expression for ${alias}`);
     assert.match(match[0], /ELSE\s+0\s+END/i);
+    assert.match(match[0], expectedNumerators[alias]);
     assert.doesNotMatch(match[0], /CONCAT|['"]%['"]|N\/A/i);
   }
+});
+
+test("numeric prose rejects Chinese percentage expressions without overmatching", () => {
+  assert.equal(containsNumericClaim("销售下降百分之三"), true);
+  assert.equal(containsNumericClaim("退款率上升百分之十二点五"), true);
+  assert.equal(containsNumericClaim("百分比口径需要统一"), false);
 });
 
 test("numeric strings, missing values, NaN, and infinities are skipped", () => {
@@ -268,8 +281,8 @@ const validDraft: InsightDraft = {
   findings: sourceIds.map((sourceId, index) => ({ sourceId, title: ["门店表现承压", "目标差距明显", "结构贡献分化"][index], summary: ["需要关注目标完成情况", "建议核查执行差异", "贡献结构值得持续观察"][index], severity: index === 2 ? "medium" : "high", confidence: "high", evidenceIds: [compareCatalog.findingSources[index].evidenceCandidateIds[0]] })),
   verificationItems: [],
   actions: [
-    { priority: "P0", title: "复盘门店执行", ownerRole: "杩愯惀", verificationMetricCode: "sales" },
-    { priority: "P1", title: "跟进目标改善", ownerRole: "搴楅暱", verificationMetricCode: "achievement_rate" },
+    { priority: "P0", title: "复盘门店执行", ownerRole: "运营", verificationMetricCode: "sales" },
+    { priority: "P1", title: "跟进目标改善", ownerRole: "店长", verificationMetricCode: "achievement_rate" },
   ],
 };
 

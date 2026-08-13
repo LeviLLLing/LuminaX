@@ -20,11 +20,11 @@ const defaultFileSystem: LatestInsightFileSystem = {
 };
 
 const insightOwnerRoles = [
-  "鍖哄煙缁忕悊",
-  "搴楅暱",
-  "杩愯惀",
-  "璐㈠姟",
-  "鏁版嵁鍒嗘瀽",
+  "区域经理",
+  "店长",
+  "运营",
+  "财务",
+  "数据分析",
 ] as const;
 
 interface LatestInsightRegistryFile {

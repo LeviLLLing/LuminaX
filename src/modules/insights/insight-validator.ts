@@ -27,6 +27,7 @@ export interface MaterializeInsightSnapshotInput {
 export function containsNumericClaim(value: string): boolean {
   return /[0-9０-９%％¥￥]/.test(value) ||
     /第[零〇一二两三四五六七八九十百千万亿]+/.test(value) ||
+    /百分之(?:零|〇|一|二|两|三|四|五|六|七|八|九|十|百|千|万|亿|点)+/.test(value) ||
     /(?:零|〇|一|二|两|三|四|五|六|七|八|九|十|百|千|万|亿|点)+(?:元|单|笔|家|店|天|日|周|月|年|成|倍|个)/.test(value);
 }
 

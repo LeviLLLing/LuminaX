@@ -216,6 +216,42 @@ test("invalid nested registry data is reported and never overwritten", async () 
   }
 });
 
+test("repository accepts every supported insight owner role", async () => {
+  const ownerRoles = ["区域经理", "店长", "运营", "财务", "数据分析"] as const;
+  const snapshot = createSnapshot({
+    actions: ownerRoles.map((ownerRole, index) => ({
+      ...createAction(),
+      id: `action-${index + 1}`,
+      ownerRole: ownerRole as InsightAction["ownerRole"],
+    })),
+  });
+  const file = await createFileContaining(
+    JSON.stringify({ version: 1, insights: { u1: snapshot } })
+  );
+
+  const restored = await new FileLatestInsightRepository(file).findByUserId("u1");
+
+  assert.deepEqual(restored?.actions.map((action) => action.ownerRole), ownerRoles);
+});
+
+test("repository rejects unknown and corrupt insight owner roles", async () => {
+  for (const ownerRole of ["未知角色", "杩愯惀"]) {
+    const snapshot = structuredClone(createSnapshot()) as unknown as Record<
+      string,
+      unknown
+    >;
+    (snapshot.actions as Array<Record<string, unknown>>)[0].ownerRole = ownerRole;
+    const file = await createFileContaining(
+      JSON.stringify({ version: 1, insights: { u1: snapshot } })
+    );
+
+    await assert.rejects(
+      new FileLatestInsightRepository(file).findByUserId("u1"),
+      InsightRepositoryCorruptError
+    );
+  }
+});
+
 test("non-finite numeric evidence in persisted JSON is reported as corrupt", async () => {
   const snapshot = createSnapshot();
   const contents = JSON.stringify({ version: 1, insights: { u1: snapshot } }).replace(
@@ -429,7 +465,7 @@ function createAction(): InsightAction {
     id: "action-1",
     priority: "P1",
     title: "Review channel performance",
-    ownerRole: "\u9356\u54c4\u7159\u7f01\u5fd5\u608a" as InsightAction["ownerRole"],
+    ownerRole: "运营",
     verificationMetricCode: "orders",
     verificationMetricLabel: "Orders",
     completed: false,
