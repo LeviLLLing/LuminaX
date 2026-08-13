@@ -66,7 +66,14 @@ export function createLatestInsightStateController(
       }
       return insight;
     } catch (error) {
-      if (sequence === reloadSequence) setState({ error: messageOf(error) });
+      if (sequence === reloadSequence) {
+        setState({
+          error: messageOf(error),
+          ...(error instanceof InsightClientError && error.status === 403
+            ? { insight: null }
+            : {}),
+        });
+      }
       throw error;
     } finally {
       if (sequence === reloadSequence) setState({ isLoading: false });

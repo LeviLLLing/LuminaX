@@ -301,6 +301,25 @@ test("action update rolls back optimistically and performs exactly one reload on
   assert.equal(fetchCount, 1);
 });
 
+test("permission failure clears a previously visible insight snapshot", async () => {
+  let authorized = true;
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => {
+      if (!authorized) throw new InsightClientError(403, "洞察权限已失效");
+      return insight;
+    },
+    updateAction: async () => insight,
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+
+  await controller.reload();
+  authorized = false;
+  await assert.rejects(controller.reload(), InsightClientError);
+
+  assert.equal(controller.getState().insight, null);
+  assert.equal(controller.getState().error, "洞察权限已失效");
+});
+
 interface ChartOption {
   xAxis?: unknown;
   yAxis?: unknown;

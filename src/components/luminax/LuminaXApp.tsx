@@ -8,6 +8,7 @@ import { WorkbenchHeader } from "@/components/luminax/workbench/WorkbenchHeader"
 import { WorkbenchShell } from "@/components/luminax/workbench/WorkbenchShell";
 import { useChatStream } from "@/hooks/use-chat-stream";
 import { useLuminaXController } from "@/hooks/use-luminax-controller";
+import { useLatestInsight } from "@/hooks/use-latest-insight";
 import { useWorkbenchContext } from "@/hooks/use-workbench-context";
 import type { AuthenticatedUser } from "@/modules/auth/auth-types";
 import { getSuggestedQuestions } from "@/modules/workbench/workbench-presentation";
@@ -15,8 +16,16 @@ import { getSuggestedQuestions } from "@/modules/workbench/workbench-presentatio
 export function LuminaXApp({ user }: { user: AuthenticatedUser }) {
   const workbench = useWorkbenchContext();
   const controller = useLuminaXController(workbench.context);
+  const latestInsight = useLatestInsight();
   const chat = useChatStream({
     onIntentMetadata: controller.applyIntentMetadata,
+    onInsightEvent: async (event) => {
+      const snapshot = await latestInsight.handleStreamEvent(event);
+      if (event.status === "updated" && snapshot) {
+        controller.applyInsightScope(snapshot.scope);
+        controller.setInsightView("analysis");
+      }
+    },
   });
 
   if (workbench.isLoading || (workbench.context && controller.loading)) {
@@ -40,10 +49,6 @@ export function LuminaXApp({ user }: { user: AuthenticatedUser }) {
   }
 
   const suggestions = getSuggestedQuestions(workbench.context);
-  const latestAssistantMessage = [...chat.messages]
-    .reverse()
-    .find((message) => message.role === "ai");
-
   return (
     <WorkbenchShell
       header={<WorkbenchHeader user={user} context={workbench.context} />}
@@ -69,8 +74,15 @@ export function LuminaXApp({ user }: { user: AuthenticatedUser }) {
           dataSummary={controller.dataSummary}
           chartOptions={controller.chartOptions}
           reportHTML={controller.reportHTML}
-          analysisContent={latestAssistantMessage?.content ?? ""}
-          isAnalyzing={chat.isStreaming}
+          insight={latestInsight.insight}
+          insightLoading={latestInsight.isLoading}
+          insightError={latestInsight.error}
+          insightGenerationStatus={latestInsight.generationStatus}
+          activeInsightScope={controller.activeInsightScope}
+          suggestions={suggestions}
+          onAskQuestion={chat.sendMessage}
+          onApplyInsightScope={controller.applyInsightScope}
+          onToggleInsightAction={latestInsight.toggleAction}
           onViewChange={controller.setInsightView}
         />
       }
