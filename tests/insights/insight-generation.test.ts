@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AnalysisIntent } from "../../src/modules/domain/analysis-types";
 import { formatCompare } from "../../src/modules/chat/answer-formatters/compare";
+import { COMPARE_SUMMARY_SQL } from "../../src/modules/metrics/sql/mysql-metric-queries";
 import type { InsightDraft, InsightScope } from "../../src/modules/insights/insight-types";
 import {
   buildInsightSourceCatalog,
@@ -216,6 +217,17 @@ test("compare uses numeric SQL rates in evidence and presentation", () => {
   const formatted = formatCompare(fixtures.compare);
   assert.match(formatted, /88\.20%/);
   assert.match(formatted, /4\.30%/);
+});
+
+test("compare SQL returns numeric rate aliases without presentation strings", () => {
+  for (const alias of ["achievementRate", "refundRate"]) {
+    const match = COMPARE_SUMMARY_SQL.match(
+      new RegExp(`CASE([\\s\\S]*?)END\\s+AS\\s+${alias}`, "i")
+    );
+    assert.ok(match, `missing CASE expression for ${alias}`);
+    assert.match(match[0], /ELSE\s+0\s+END/i);
+    assert.doesNotMatch(match[0], /CONCAT|['"]%['"]|N\/A/i);
+  }
 });
 
 test("numeric strings, missing values, NaN, and infinities are skipped", () => {
