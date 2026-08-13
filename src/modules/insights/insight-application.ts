@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import {
+  DataAccessDeniedError,
+  type AccessControl,
+} from "@/modules/admin/permissions/access-control";
 import type { BusinessAnalysisContext } from "@/modules/agents/business/business-agent";
 import {
   InsightGenerationGuard,
@@ -46,7 +50,8 @@ interface InsightApplicationDependencies {
     intent: BusinessAnalysisContext["intent"];
     analysisData: Record<string, unknown>;
   }) => InsightSourceCatalog;
-  authorizeSnapshot?: (snapshot: InsightSnapshot) => Promise<void>;
+  accessControl: Pick<AccessControl, "authorizeScope">;
+  listStoreIds(): Promise<string[]>;
 }
 
 export class StaleInsightGenerationError extends Error {
@@ -61,8 +66,26 @@ export function createInsightApplication({
   guard,
   composer,
   buildCatalog = buildInsightSourceCatalog,
-  authorizeSnapshot = async () => undefined,
+  accessControl,
+  listStoreIds,
 }: InsightApplicationDependencies): InsightApplication {
+  async function authorizeSnapshot(
+    userId: string,
+    snapshot: InsightSnapshot
+  ): Promise<void> {
+    const availableStoreIds = await listStoreIds();
+    const scope = await accessControl.authorizeScope({
+      userId,
+      requirements: snapshot.accessRequirements,
+      requestedStoreIds: snapshot.scope.storeIds,
+      availableStoreIds,
+      strictStoreScope: true,
+    });
+    if (!sameStringSet(scope.storeIds, snapshot.scope.storeIds)) {
+      throw new DataAccessDeniedError();
+    }
+  }
+
   return {
     beginRequest(userId, requestId = randomUUID(), startedAt = Date.now()) {
       return { userId, requestId, startedAt };
@@ -103,13 +126,13 @@ export function createInsightApplication({
     async getLatest(userId) {
       const snapshot = await repository.findByUserId(userId);
       if (!snapshot) return null;
-      await authorizeSnapshot(snapshot);
+      await authorizeSnapshot(userId, snapshot);
       return toInsightSnapshotDto(snapshot);
     },
 
     async updateAction(input) {
       const current = await repository.findByUserId(input.userId);
-      if (current) await authorizeSnapshot(current);
+      if (current) await authorizeSnapshot(input.userId, current);
       const snapshot = await repository.updateActionState(
         input.userId,
         input.insightId,
@@ -119,6 +142,15 @@ export function createInsightApplication({
       return toInsightSnapshotDto(snapshot);
     },
   };
+}
+
+function sameStringSet(left: string[], right: string[]): boolean {
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  return (
+    leftSet.size === rightSet.size &&
+    [...leftSet].every((value) => rightSet.has(value))
+  );
 }
 
 export function buildInsightReceipt(snapshot: InsightSnapshot): string {

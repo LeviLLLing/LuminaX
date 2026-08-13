@@ -24,13 +24,6 @@ export const insightApplication = createInsightApplication({
   repository: new FileLatestInsightRepository(),
   guard: new InsightGenerationGuard(),
   composer: insightComposer,
-  authorizeSnapshot: async (snapshot) => {
-    await accessControl.authorizeScope({
-      userId: snapshot.userId,
-      requirements: snapshot.accessRequirements,
-      requestedStoreIds: snapshot.scope.storeIds,
-      availableStoreIds: await metricQueryExecutor.listStoreIds(),
-      strictStoreScope: true,
-    });
-  },
+  accessControl,
+  listStoreIds: () => metricQueryExecutor.listStoreIds(),
 });

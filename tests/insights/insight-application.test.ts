@@ -11,6 +11,7 @@ import type { InsightComposer } from "../../src/modules/insights/insight-compose
 import type { InsightSourceCatalog } from "../../src/modules/insights/insight-source-catalog";
 import type { InsightSnapshot } from "../../src/modules/insights/insight-types";
 import type { LatestInsightRepository } from "../../src/modules/insights/latest-insight-repository";
+import { DataAccessDeniedError } from "../../src/modules/admin/permissions/access-control";
 
 const analysis: BusinessAnalysisContext = {
   question: "对比门店表现",
@@ -37,9 +38,8 @@ test("successful generation saves before returning and produces a short receipt"
     guard: new InsightGenerationGuard(),
     composer: createComposer(order),
     buildCatalog: () => catalog,
-    authorizeSnapshot: async () => {
-      order.push("authorized");
-    },
+    accessControl: createAllowingAccessControl(order),
+    listStoreIds: async () => ["S001", "S002"],
   });
 
   const snapshot = await application.generateForAnalysis(
@@ -62,6 +62,8 @@ test("older concurrent analysis cannot overwrite the newer request", async () =>
     guard: new InsightGenerationGuard(),
     composer: createComposer([]),
     buildCatalog: () => catalog,
+    accessControl: createAllowingAccessControl([]),
+    listStoreIds: async () => ["S001", "S002"],
   });
   const oldToken = application.beginRequest("u1", "old", 10);
   const newToken = application.beginRequest("u1", "new", 20);
@@ -98,6 +100,8 @@ test("an older generation that finishes composing last cannot write", async () =
       },
     },
     buildCatalog: () => catalog,
+    accessControl: createAllowingAccessControl([]),
+    listStoreIds: async () => ["S001", "S002"],
   });
   const oldAnalysis = { ...analysis, question: "old" };
   const newAnalysis = { ...analysis, question: "new" };
@@ -124,11 +128,139 @@ test("beginRequest does not claim the generation guard", async () => {
     guard,
     composer: createComposer([]),
     buildCatalog: () => catalog,
+    accessControl: createAllowingAccessControl([]),
+    listStoreIds: async () => ["S001", "S002"],
   });
   const inFlight = application.beginRequest("u1", "in-flight", 10);
   assert.equal(guard.claim(inFlight), true);
   application.beginRequest("u1", "not-generated", 20);
   assert.equal(guard.isCurrent(inFlight), true);
+});
+
+test("getLatest reauthorizes every requirement and exact stored store set", async () => {
+  const repository = createRepository([]);
+  const seed = createSnapshotFixture("u1");
+  await repository.replaceForUser(seed);
+  let authorizationInput: unknown;
+  const application = createInsightApplication({
+    repository,
+    guard: new InsightGenerationGuard(),
+    composer: createComposer([]),
+    buildCatalog: () => catalog,
+    listStoreIds: async () => ["S001", "S002", "S003"],
+    accessControl: {
+      async authorizeScope(input) {
+        authorizationInput = input;
+        return { storeIds: ["S002", "S001"] };
+      },
+    },
+  });
+
+  const result = await application.getLatest("u1");
+  assert.equal(result?.id, seed.id);
+  assert.deepEqual(authorizationInput, {
+    userId: "u1",
+    requirements: seed.accessRequirements,
+    requestedStoreIds: ["S001", "S002"],
+    availableStoreIds: ["S001", "S002", "S003"],
+    strictStoreScope: true,
+  });
+  assert.equal(result && "userId" in result, false);
+});
+
+test("getLatest returns null without an authorization lookup", async () => {
+  let authorizeCalls = 0;
+  const application = createInsightApplication({
+    repository: createRepository([]),
+    guard: new InsightGenerationGuard(),
+    composer: createComposer([]),
+    buildCatalog: () => catalog,
+    listStoreIds: async () => { throw new Error("must not run"); },
+    accessControl: {
+      async authorizeScope() {
+        authorizeCalls += 1;
+        return { storeIds: [] };
+      },
+    },
+  });
+  assert.equal(await application.getLatest("u1"), null);
+  assert.equal(authorizeCalls, 0);
+});
+
+test("snapshot access fails when the authorized store set is not exact", async () => {
+  const repository = createRepository([]);
+  await repository.replaceForUser(createSnapshotFixture("u1"));
+  let updates = 0;
+  const guardedRepository: LatestInsightRepository = {
+    ...repository,
+    async updateActionState(...args) {
+      updates += 1;
+      return repository.updateActionState(...args);
+    },
+  };
+  for (const authorizedStoreIds of [["S001"], ["S001", "S002", "S003"]]) {
+    const application = createInsightApplication({
+      repository: guardedRepository,
+      guard: new InsightGenerationGuard(),
+      composer: createComposer([]),
+      buildCatalog: () => catalog,
+      listStoreIds: async () => ["S001", "S002", "S003"],
+      accessControl: {
+        async authorizeScope() { return { storeIds: authorizedStoreIds }; },
+      },
+    });
+    await assert.rejects(application.getLatest("u1"), DataAccessDeniedError);
+    await assert.rejects(
+      application.updateAction({ userId: "u1", insightId: "insight-1", actionId: "action-1", completed: true }),
+      DataAccessDeniedError
+    );
+  }
+  assert.equal(updates, 0);
+});
+
+test("updateAction authorizes before mutating the authenticated user's snapshot", async () => {
+  const repository = createRepository([]);
+  const seed = createSnapshotFixture("u1");
+  await repository.replaceForUser(seed);
+  const order: string[] = [];
+  const guardedRepository: LatestInsightRepository = {
+    ...repository,
+    async updateActionState(userId, insightId, actionId, completed) {
+      order.push("update");
+      assert.deepEqual(
+        { userId, insightId, actionId, completed },
+        { userId: "u1", insightId: "insight-1", actionId: "action-1", completed: true }
+      );
+      const updated = structuredClone(seed);
+      updated.actions[0].completed = completed;
+      updated.actions[0].completedAt = "2026-08-13T01:00:00.000Z";
+      updated.updatedAt = "2026-08-13T01:00:00.000Z";
+      return updated;
+    },
+  };
+  const application = createInsightApplication({
+    repository: guardedRepository,
+    guard: new InsightGenerationGuard(),
+    composer: createComposer([]),
+    buildCatalog: () => catalog,
+    listStoreIds: async () => ["S001", "S002"],
+    accessControl: {
+      async authorizeScope() {
+        order.push("authorize");
+        return { storeIds: ["S001", "S002"] };
+      },
+    },
+  });
+
+  const dto = await application.updateAction({
+    userId: "u1",
+    insightId: "insight-1",
+    actionId: "action-1",
+    completed: true,
+  });
+  assert.deepEqual(order, ["authorize", "update"]);
+  assert.equal(dto.actions[0].completed, true);
+  assert.equal("accessRequirements" in dto, false);
 });
 
 const catalog: InsightSourceCatalog = {
@@ -177,5 +309,33 @@ function createRepository(order: string[]): LatestInsightRepository {
     async findByUserId() { return current && structuredClone(current); },
     async replaceForUser(snapshot) { order.push("save"); current = structuredClone(snapshot); return structuredClone(snapshot); },
     async updateActionState() { if (!current) throw new Error("missing"); return structuredClone(current); },
+  };
+}
+
+function createAllowingAccessControl(order: string[] = []) {
+  return {
+    async authorizeScope(input: { requestedStoreIds: string[] }) {
+      order.push("authorized");
+      return { storeIds: [...input.requestedStoreIds] };
+    },
+  };
+}
+
+function createSnapshotFixture(userId: string): InsightSnapshot {
+  return {
+    id: "insight-1",
+    userId,
+    sourceQuestion: "Compare store performance",
+    sourceIntent: "compare",
+    scope: { storeIds: ["S001", "S002"], startDate: "2025-05-01", endDate: "2025-05-14", comparisonLabel: null },
+    headline: "Store difference",
+    findings: [],
+    evidence: [],
+    verificationItems: [],
+    actions: [{ id: "action-1", priority: "P1", title: "Review execution", ownerRole: "运营", verificationMetricCode: "sales", verificationMetricLabel: "Sales", completed: false, completedAt: null }],
+    accessRequirements: [{ tableName: "store_sales_daily", columns: ["store_id", "sales_amount"] }],
+    sourceFingerprint: "fingerprint-1",
+    createdAt: "2026-08-13T00:00:00.000Z",
+    updatedAt: "2026-08-13T00:00:00.000Z",
   };
 }

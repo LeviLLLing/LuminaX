@@ -13,3 +13,4 @@ import "./insights/insight-types.test";
 import "./insights/insight-generation.test";
 import "./insights/latest-insight-repository.test";
 import "./insights/insight-application.test";
+import "./insights/insight-routes.test";
