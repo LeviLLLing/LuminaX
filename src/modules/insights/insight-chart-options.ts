@@ -125,7 +125,15 @@ export function formatInsightValue(value: unknown, unit: string): string {
   if (unit === "percentage" || unit === "%") {
     return `${formatNumber(value, 1)}%`;
   }
-  if (unit === "currency") return `¥${formatNumber(value, 2)}`;
+  if (unit === "currency") {
+    return new Intl.NumberFormat("zh-CN", {
+      style: "currency",
+      currency: "CNY",
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  }
   if (unit === "count") {
     return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(value);
   }

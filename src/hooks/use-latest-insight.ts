@@ -77,25 +77,32 @@ export function createLatestInsightStateController(
     event: InsightStreamEvent
   ): Promise<InsightSnapshotDto | null> => {
     if (event.status === "generating") {
-      setState({ generationStatus: "generating", error: null });
+      reloadSequence += 1;
+      setState({ generationStatus: "generating", error: null, isLoading: false });
       return state.insight;
     }
     if (event.status === "failed") {
+      reloadSequence += 1;
       setState({
         generationStatus: "failed",
         error: "洞察更新失败，当前洞察仍可继续使用",
+        isLoading: false,
       });
       return state.insight;
     }
 
+    const updatedReloadSequence = reloadSequence + 1;
     try {
       const insight = await reload();
+      if (updatedReloadSequence !== reloadSequence) return state.insight;
       if (state.insight?.id === event.insightId) {
         setState({ generationStatus: "idle", error: null });
       }
       return insight;
     } catch {
-      setState({ generationStatus: "failed" });
+      if (updatedReloadSequence === reloadSequence) {
+        setState({ generationStatus: "failed" });
+      }
       return state.insight;
     }
   };

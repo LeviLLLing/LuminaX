@@ -6,7 +6,10 @@ import {
   normalizeInsightSnapshotDto,
   updateLatestInsightAction,
 } from "../../src/modules/insights/insight-client";
-import { buildInsightEvidenceChartOption } from "../../src/modules/insights/insight-chart-options";
+import {
+  buildInsightEvidenceChartOption,
+  formatInsightValue,
+} from "../../src/modules/insights/insight-chart-options";
 import type { InsightSnapshotDto } from "../../src/modules/insights/insight-types";
 import { isInsightScopeActive } from "../../src/modules/workbench/workbench-presentation";
 import {
@@ -95,6 +98,11 @@ test("evidence chart options format internal units as professional display value
   assert.ok(formatted.every((value) => !/percentage|currency|count|ratio/.test(value)));
 });
 
+test("currency formatting places the sign before the CNY symbol", () => {
+  assert.equal(formatInsightValue(-12, "currency"), "-¥12.00");
+  assert.equal(formatInsightValue(12345.67, "currency"), "¥12,345.67");
+});
+
 test("horizontal evidence aligns every heterogeneous baseline with its sorted category", () => {
   const option = buildInsightEvidenceChartOption({
     ...insight.evidence[0],
@@ -108,7 +116,7 @@ test("horizontal evidence aligns every heterogeneous baseline with its sorted ca
   const baselines = option.series[1].data as Array<{ value: [number, string] }>;
   assert.deepEqual(categories, ["Large", "Small"]);
   assert.deepEqual(baselines.map((item) => item.value), [[15, "Large"], [9, "Small"]]);
-  assert.deepEqual(baselines.map((item) => callFormatter(option.series[1].label?.formatter, item.value)), ["¥15", "¥9"]);
+  assert.deepEqual(baselines.map((item) => callFormatter(option.series[1].label?.formatter, item.value)), ["¥15.00", "¥9.00"]);
 });
 
 test("timeline evidence preserves every point baseline in deterministic key order", () => {
@@ -212,6 +220,63 @@ test("stale matching reload cannot clear generation status after a newer snapsho
   await staleUpdated;
   assert.equal(controller.getState().insight?.id, "newer");
   assert.equal(controller.getState().generationStatus, "generating");
+});
+
+test("new generating event invalidates an older updated reload", async () => {
+  let resolveUpdated!: (value: InsightSnapshotDto) => void;
+  let fetchCount = 0;
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) return insight;
+      return new Promise((resolve) => {
+        resolveUpdated = resolve;
+      });
+    },
+    updateAction: async () => insight,
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  await controller.reload();
+  const olderUpdated = controller.handleStreamEvent({
+    status: "updated",
+    insightId: "i2",
+    findingCount: 1,
+    actionCount: 1,
+  });
+  await controller.handleStreamEvent({ status: "generating" });
+  resolveUpdated({ ...insight, id: "i2" });
+  await olderUpdated;
+  assert.equal(controller.getState().insight?.id, "i1");
+  assert.equal(controller.getState().generationStatus, "generating");
+});
+
+test("new failed event invalidates an older updated reload", async () => {
+  let resolveUpdated!: (value: InsightSnapshotDto) => void;
+  let fetchCount = 0;
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) return insight;
+      return new Promise((resolve) => {
+        resolveUpdated = resolve;
+      });
+    },
+    updateAction: async () => insight,
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  await controller.reload();
+  const olderUpdated = controller.handleStreamEvent({
+    status: "updated",
+    insightId: "i2",
+    findingCount: 1,
+    actionCount: 1,
+  });
+  await controller.handleStreamEvent({ status: "failed" });
+  resolveUpdated({ ...insight, id: "i2" });
+  await olderUpdated;
+  assert.equal(controller.getState().insight?.id, "i1");
+  assert.equal(controller.getState().generationStatus, "failed");
+  assert.match(controller.getState().error || "", /仍可继续使用/);
 });
 
 test("action update rolls back optimistically and performs exactly one reload on 409", async () => {
