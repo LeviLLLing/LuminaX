@@ -89,8 +89,8 @@ export function createInsightApplication({
   }
 
   async function activateRequest(token: InsightRequestToken): Promise<boolean> {
-    if (!guard.claim(token)) return false;
-    return repository.claimGeneration(token);
+    if (!(await repository.claimGeneration(token))) return false;
+    return guard.claim(token);
   }
 
   return {

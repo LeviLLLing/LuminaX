@@ -176,6 +176,32 @@ test("beginRequest does not claim the generation guard", async () => {
   assert.equal(guard.isCurrent(inFlight), true);
 });
 
+test("a failed newer persisted claim does not supersede the active in-memory token", async () => {
+  const guard = new InsightGenerationGuard();
+  const repository = createRepository([]);
+  const application = createInsightApplication({
+    repository: {
+      ...repository,
+      async claimGeneration(token) {
+        if (token.requestId === "new") throw new Error("registry unavailable");
+        return repository.claimGeneration(token);
+      },
+    },
+    guard,
+    composer: createComposer([]),
+    buildCatalog: () => catalog,
+    accessControl: createAllowingAccessControl([]),
+    listStoreIds: async () => ["S001", "S002"],
+  });
+  const oldToken = application.beginRequest("u1", "old", 10);
+  const newToken = application.beginRequest("u1", "new", 20);
+
+  assert.equal(await application.activateRequest(oldToken), true);
+  await assert.rejects(application.activateRequest(newToken), /registry unavailable/);
+  assert.equal(guard.isCurrent(oldToken), true);
+  assert.equal(guard.isCurrent(newToken), false);
+});
+
 test("getLatest reauthorizes every requirement and exact stored store set", async () => {
   const repository = createRepository([]);
   const seed = createSnapshotFixture("u1");
