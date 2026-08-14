@@ -8,6 +8,7 @@ import {
   type UpdateLatestInsightActionInput,
 } from "@/modules/insights/insight-client";
 import type {
+  InsightGenerationReference,
   InsightSnapshotDto,
   InsightStreamEvent,
 } from "@/modules/insights/insight-types";
@@ -52,6 +53,7 @@ export function createLatestInsightStateController(
   };
   let reloadSequence = 0;
   let snapshotRevision = 0;
+  let latestGeneration: InsightGenerationReference | null = null;
   const actionSequences = new Map<string, number>();
   const listeners = new Set<(state: LatestInsightState) => void>();
 
@@ -88,6 +90,7 @@ export function createLatestInsightStateController(
   const handleStreamEvent = async (
     event: InsightStreamEvent
   ): Promise<InsightSnapshotDto | null> => {
+    if (!acceptGeneration(event.generation, event.status)) return state.insight;
     if (event.status === "generating") {
       reloadSequence += 1;
       setState({ generationStatus: "generating", error: null, isLoading: false });
@@ -118,6 +121,23 @@ export function createLatestInsightStateController(
       return state.insight;
     }
   };
+
+  function acceptGeneration(
+    generation: InsightGenerationReference | undefined,
+    status: InsightStreamEvent["status"]
+  ): boolean {
+    if (!generation) return true;
+    if (latestGeneration) {
+      const order = compareGenerations(generation, latestGeneration);
+      if (order < 0) return false;
+      if (status !== "generating" && order !== 0) {
+        latestGeneration = generation;
+        return true;
+      }
+    }
+    latestGeneration = generation;
+    return true;
+  }
 
   const toggleAction = async (
     actionId: string,
@@ -232,6 +252,13 @@ export function createLatestInsightStateController(
     handleStreamEvent,
     toggleAction,
   };
+}
+
+function compareGenerations(
+  left: InsightGenerationReference,
+  right: InsightGenerationReference
+): number {
+  return left.startedAt - right.startedAt || left.requestId.localeCompare(right.requestId);
 }
 
 export function useLatestInsight(): UseLatestInsightResult {

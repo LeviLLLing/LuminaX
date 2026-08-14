@@ -279,6 +279,38 @@ test("new failed event invalidates an older updated reload", async () => {
   assert.match(controller.getState().error || "", /仍可继续使用/);
 });
 
+test("generation tokens prevent older lifecycle events from replacing newer state", async () => {
+  let fetchCount = 0;
+  const controller = createLatestInsightStateController({
+    fetchLatest: async () => {
+      fetchCount += 1;
+      return insight;
+    },
+    updateAction: async () => insight,
+    now: () => "2026-08-13T01:00:00.000Z",
+  });
+  const older = { requestId: "older", startedAt: 1 };
+  const newer = { requestId: "newer", startedAt: 2 };
+
+  await controller.handleStreamEvent({ status: "generating", generation: older });
+  await controller.handleStreamEvent({ status: "generating", generation: newer });
+  await controller.handleStreamEvent({ status: "failed", generation: older });
+  await controller.handleStreamEvent({
+    status: "updated",
+    insightId: "old-insight",
+    findingCount: 1,
+    actionCount: 1,
+    generation: older,
+  });
+
+  assert.equal(controller.getState().generationStatus, "generating");
+  assert.equal(controller.getState().error, null);
+  assert.equal(fetchCount, 0);
+
+  await controller.handleStreamEvent({ status: "failed", generation: newer });
+  assert.equal(controller.getState().generationStatus, "failed");
+});
+
 test("action update rolls back optimistically and performs exactly one reload on 409", async () => {
   let fetchCount = 0;
   const visible: boolean[] = [];

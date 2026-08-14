@@ -37,6 +37,7 @@ export interface ChatStreamPayload {
   insightId?: unknown;
   findingCount?: unknown;
   actionCount?: unknown;
+  generation?: unknown;
 }
 
 export const CHAT_STATUS_LABELS: Record<string, string> = {
@@ -141,8 +142,10 @@ export async function streamChatMessage(
 }
 
 function normalizeInsightEvent(payload: ChatStreamPayload): InsightStreamEvent | null {
+  const generation = normalizeGeneration(payload.generation);
+  if (payload.generation !== undefined && !generation) return null;
   if (payload.status === "generating" || payload.status === "failed") {
-    return { status: payload.status };
+    return { status: payload.status, ...(generation ? { generation } : {}) };
   }
   if (
     payload.status === "updated" &&
@@ -160,9 +163,21 @@ function normalizeInsightEvent(payload: ChatStreamPayload): InsightStreamEvent |
       insightId: payload.insightId,
       findingCount: payload.findingCount,
       actionCount: payload.actionCount,
+      ...(generation ? { generation } : {}),
     };
   }
   return null;
+}
+
+function normalizeGeneration(
+  value: unknown
+): { requestId: string; startedAt: number } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const generation = value as Record<string, unknown>;
+  return typeof generation.requestId === "string" && generation.requestId.length > 0 &&
+    typeof generation.startedAt === "number" && Number.isFinite(generation.startedAt)
+    ? { requestId: generation.requestId, startedAt: generation.startedAt }
+    : null;
 }
 
 async function readChatErrorMessage(response: Response): Promise<string> {

@@ -94,7 +94,7 @@ test("SSE parser keeps protocol handling outside the React hook", () => {
 
 test("chat client parses insight lifecycle events", () => {
   const payloads = parseServerSentEvent(
-    'data: {"type":"insight","status":"updated","insightId":"i1","findingCount":3,"actionCount":2}'
+    'data: {"type":"insight","status":"updated","insightId":"i1","findingCount":3,"actionCount":2,"generation":{"requestId":"r2","startedAt":2}}'
   );
   assert.deepEqual(payloads[0], {
     type: "insight",
@@ -102,6 +102,7 @@ test("chat client parses insight lifecycle events", () => {
     insightId: "i1",
     findingCount: 3,
     actionCount: 2,
+    generation: { requestId: "r2", startedAt: 2 },
   });
 });
 
@@ -109,7 +110,7 @@ test("chat stream dispatches valid insight events and ignores malformed ones", a
   const events: unknown[] = [];
   context.mock.method(globalThis, "fetch", async () => new Response(
     'data: {"type":"insight","status":"generating"}\n\n' +
-    'data: {"type":"insight","status":"updated","insightId":"i1","findingCount":3,"actionCount":2}\n\n' +
+      'data: {"type":"insight","status":"updated","insightId":"i1","findingCount":3,"actionCount":2,"generation":{"requestId":"r2","startedAt":2}}\n\n' +
     'data: {"type":"insight","status":"updated","insightId":7}\n\n' +
     'data: {"type":"content","content":"done"}\n\n',
     { status: 200, headers: { "Content-Type": "text/event-stream" } }
@@ -120,7 +121,7 @@ test("chat stream dispatches valid insight events and ignores malformed ones", a
   );
   assert.deepEqual(events, [
     { status: "generating" },
-    { status: "updated", insightId: "i1", findingCount: 3, actionCount: 2 },
+    { status: "updated", insightId: "i1", findingCount: 3, actionCount: 2, generation: { requestId: "r2", startedAt: 2 } },
   ]);
 });
 
@@ -193,7 +194,7 @@ test("insight failure emits failed and falls back to one full answer", async (co
   assert.deepEqual(content, ["完整业务分析正文"]);
 });
 
-test("a superseded request emits no stale insight lifecycle state", async () => {
+test("a request superseded before projection emits no stale terminal state", async () => {
   const events: string[] = [];
   let activation = 0;
   let generations = 0;
@@ -221,17 +222,20 @@ test("a superseded request emits no stale insight lifecycle state", async () => 
 
   assert.equal(result.content, "完整业务分析正文");
   assert.equal(generations, 0);
-  assert.deepEqual(events, []);
+  assert.deepEqual(events, ["generating"]);
 });
 
 test("a request superseded during composition does not emit failed", async () => {
   const events: string[] = [];
+  let activation = 0;
+  const staleApplication = insightApplication(async () => {
+    throw new StaleInsightGenerationError();
+  });
+  staleApplication.activateRequest = async () => ++activation < 3;
   const application = createChatApplication({
     governanceAgent: allowGovernance(),
     businessAgent: projectingBusinessAgent(),
-    insightApplication: insightApplication(async () => {
-      throw new StaleInsightGenerationError();
-    }),
+    insightApplication: staleApplication,
   });
 
   const result = await application.execute({

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -39,7 +39,6 @@ interface LatestInsightRegistryFile {
 const sharedWriteQueues = new Map<string, Promise<unknown>>();
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 5_000;
-const STALE_LOCK_MS = 30_000;
 
 export interface LatestInsightRepository {
   findByUserId(userId: string): Promise<InsightSnapshot | null>;
@@ -271,15 +270,7 @@ async function withFileLock<T>(
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      try {
-        const lockStats = await stat(lockPath);
-        if (Date.now() - lockStats.mtimeMs > STALE_LOCK_MS) {
-          await rm(lockPath, { force: true });
-          continue;
-        }
-      } catch (statError) {
-        if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError;
-      }
+      await reclaimDeadProcessLock(lockPath);
       if (Date.now() >= deadline) {
         throw new Error("Timed out waiting for the latest insight repository lock.");
       }
@@ -301,8 +292,47 @@ async function withFileLock<T>(
     attachCleanupError(operationError, cleanupError);
     throw operationError;
   }
-  if (cleanupError) throw cleanupError;
+  if (cleanupError) {
+    console.error(
+      "Latest insight lock cleanup failed:",
+      cleanupError instanceof Error ? cleanupError.name : "UnknownError"
+    );
+  }
   return result as T;
+}
+
+async function reclaimDeadProcessLock(lockPath: string): Promise<void> {
+  const reaperPath = `${lockPath}.reap`;
+  let reaper: FileHandle;
+  try {
+    reaper = await open(reaperPath, "wx");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
+    throw error;
+  }
+
+  try {
+    const owner = await readFile(lockPath, "utf8").catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    const ownerPid = owner ? Number.parseInt(owner.split(":", 1)[0], 10) : NaN;
+    if (Number.isSafeInteger(ownerPid) && ownerPid > 0 && !isProcessAlive(ownerPid)) {
+      await rm(lockPath, { force: true });
+    }
+  } finally {
+    await reaper.close().catch(() => undefined);
+    await rm(reaperPath, { force: true }).catch(() => undefined);
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
 }
 
 async function releaseFileLock(

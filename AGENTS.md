@@ -32,10 +32,10 @@
 
 ### Insight projection
 - `InsightApplication` consumes only authorized structured analysis. `InsightComposer` may select catalog IDs and draft hypotheses or actions, while the validator derives every persisted headline, finding title, finding summary, and observed fact from the deterministic SQL source catalog.
-- `LatestInsightRepository` defaults to `.luminax/latest-insights.json`. The file repository persists per-user generation tokens and serializes claims and commits with an atomic file lock; its interface is replaceable by a MySQL CAS implementation without changing the application or HTTP routes.
+- `LatestInsightRepository` defaults to `.luminax/latest-insights.json`. The file repository persists per-user generation tokens and serializes claims and commits with an atomic file lock. A lock is reclaimed only when its recorded process is confirmed dead; its interface is replaceable by a MySQL CAS implementation without changing the application or HTTP routes.
 - `GET /api/insights/latest` restores the current user's latest snapshot. `PATCH /api/insights/latest/actions/:actionId` updates one action using the current insight ID for optimistic concurrency.
 - Both routes reauthorize the exact stored table, column, and store requirements before returning or mutating a snapshot. Authorization failure hides the full snapshot rather than returning a partial result.
-- Insight generation adds `generating`, `updated`, and `failed` lifecycle events to SSE. A triggerable newer analysis persists its request token before SQL execution, and snapshot commits require that exact current token. Superseded requests emit no stale failure state; other failures preserve the previous insight and fall back to the full chat answer.
+- Insight generation adds `generating`, `updated`, and `failed` lifecycle events to SSE. New events carry an optional `generation` reference for wire compatibility, and the client rejects events older than the latest observed generation. A triggerable analysis starts its lifecycle when its token is persisted before SQL; every current-request exit reaches `updated` or `failed`, while superseded requests exit silently.
 
 ### Metrics and SQL
 - Fixed metric execution uses `SqlMetricQueryExecutor.execute(intent, scope)` from `src/modules/metrics/sql-metric-query-executor.ts`, implemented by `MySqlSqlMetricQueryExecutor` in `src/modules/metrics/sql/mysql-sql-metric-query-executor.ts`.

@@ -83,8 +83,13 @@ export function createChatApplication({
       const insightToken = insightApplication
         ? insightApplication.beginRequest(userId, randomUUID(), Date.now())
         : null;
+      const insightGeneration = insightToken
+        ? { requestId: insightToken.requestId, startedAt: insightToken.startedAt }
+        : undefined;
       let insightPlanObserved = false;
       let insightRequestActive = false;
+      let insightLifecycleStarted = false;
+      let insightLifecycleFinalized = false;
       const activateInsightRequest = async (): Promise<boolean> => {
         if (!insightApplication || !insightToken) return false;
         try {
@@ -96,6 +101,17 @@ export function createChatApplication({
           );
           return false;
         }
+      };
+      const startInsightLifecycle = () => {
+        if (!insightGeneration || insightLifecycleStarted) return;
+        insightLifecycleStarted = true;
+        stream.emitInsight({ status: "generating", generation: insightGeneration });
+      };
+      const failCurrentInsightLifecycle = async () => {
+        if (!insightLifecycleStarted || insightLifecycleFinalized) return;
+        if (!(await activateInsightRequest())) return;
+        insightLifecycleFinalized = true;
+        stream.emitInsight({ status: "failed", generation: insightGeneration });
       };
       stream.emitStatus("governance");
       const governanceResult = await governanceAgent.review({
@@ -115,7 +131,7 @@ export function createChatApplication({
 
       stream.emitStatus("computing");
       try {
-        return await businessAgent.execute({
+        const result = await businessAgent.execute({
           ...governanceResult.handoff,
           userId,
           storeIds: command.storeIds,
@@ -128,6 +144,7 @@ export function createChatApplication({
                   insightPlanObserved = true;
                   if (shouldGenerateInsight(intent)) {
                     insightRequestActive = await activateInsightRequest();
+                    if (insightRequestActive) startInsightLifecycle();
                   }
                 }
               : undefined,
@@ -137,37 +154,45 @@ export function createChatApplication({
                   if (!shouldGenerateInsight(analysis.intent)) return null;
                   if (!insightPlanObserved) {
                     insightRequestActive = await activateInsightRequest();
+                    if (insightRequestActive) startInsightLifecycle();
                   }
                   if (insightRequestActive) {
                     insightRequestActive = await activateInsightRequest();
                   }
                   if (!insightRequestActive) return null;
-                  stream.emitInsight({ status: "generating" });
                   try {
                     const snapshot = await insightApplication.generateForAnalysis(
                       insightToken,
                       analysis
                     );
+                    if (!(await activateInsightRequest())) return null;
+                    insightLifecycleFinalized = true;
                     stream.emitInsight({
                       status: "updated",
                       insightId: snapshot.id,
                       findingCount: snapshot.findings.length,
                       actionCount: snapshot.actions.length,
+                      generation: insightGeneration,
                     });
                     return { content: buildInsightReceipt(snapshot) };
                   } catch (error) {
                     if (error instanceof StaleInsightGenerationError) return null;
+                    if (!(await activateInsightRequest())) return null;
                     console.error(
                       "Insight projection failed:",
                       error instanceof Error ? error.name : "UnknownError"
                     );
-                    stream.emitInsight({ status: "failed" });
+                    insightLifecycleFinalized = true;
+                    stream.emitInsight({ status: "failed", generation: insightGeneration });
                     return null;
                   }
                 }
               : undefined,
         });
+        await failCurrentInsightLifecycle();
+        return result;
       } catch (error) {
+        await failCurrentInsightLifecycle();
         if (
           error instanceof BusinessAgentError &&
           error.code === "DATA_NOT_LOADED"

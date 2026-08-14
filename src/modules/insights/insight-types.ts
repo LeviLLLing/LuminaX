@@ -98,9 +98,14 @@ export type InsightSnapshotDto = Omit<
 >;
 
 export type InsightStreamEvent =
-  | { status: "generating" }
-  | { status: "updated"; insightId: string; findingCount: number; actionCount: number }
-  | { status: "failed" };
+  | { status: "generating"; generation?: InsightGenerationReference }
+  | { status: "updated"; insightId: string; findingCount: number; actionCount: number; generation?: InsightGenerationReference }
+  | { status: "failed"; generation?: InsightGenerationReference };
+
+export interface InsightGenerationReference {
+  requestId: string;
+  startedAt: number;
+}
 
 export interface InsightDraft {
   findings: Array<{
