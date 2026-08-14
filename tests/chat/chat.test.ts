@@ -281,6 +281,41 @@ test("generation claim failure preserves the full business answer", async (conte
   assert.deepEqual(events, []);
 });
 
+test("generation verification failure closes an already started lifecycle", async (context) => {
+  context.mock.method(console, "error", () => undefined);
+  const events: string[] = [];
+  let activation = 0;
+  let generations = 0;
+  const unavailableApplication = insightApplication(async () => {
+    generations += 1;
+    return snapshot();
+  });
+  unavailableApplication.activateRequest = async () => {
+    if (++activation === 1) return true;
+    throw new Error("registry unavailable");
+  };
+  const application = createChatApplication({
+    governanceAgent: allowGovernance(),
+    businessAgent: projectingBusinessAgent(),
+    insightApplication: unavailableApplication,
+  });
+
+  const result = await application.execute({
+    userId: "u1",
+    question: "对比门店表现",
+    stream: {
+      emitStatus() {},
+      emitReasoning() {},
+      emitContent() {},
+      emitInsight(event) { events.push(event.status); },
+    },
+  });
+
+  assert.equal(result.content, "完整业务分析正文");
+  assert.equal(generations, 0);
+  assert.deepEqual(events, ["generating", "failed"]);
+});
+
 test("non-triggering intent emits no insight event and does not generate", async () => {
   let generations = 0;
   const events: string[] = [];

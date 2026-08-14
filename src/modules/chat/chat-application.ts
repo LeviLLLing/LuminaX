@@ -90,16 +90,20 @@ export function createChatApplication({
       let insightRequestActive = false;
       let insightLifecycleStarted = false;
       let insightLifecycleFinalized = false;
-      const activateInsightRequest = async (): Promise<boolean> => {
-        if (!insightApplication || !insightToken) return false;
+      const activateInsightRequest = async (): Promise<
+        "active" | "superseded" | "unavailable"
+      > => {
+        if (!insightApplication || !insightToken) return "superseded";
         try {
-          return await insightApplication.activateRequest(insightToken);
+          return (await insightApplication.activateRequest(insightToken))
+            ? "active"
+            : "superseded";
         } catch (error) {
           console.error(
             "Insight generation claim failed:",
             error instanceof Error ? error.name : "UnknownError"
           );
-          return false;
+          return "unavailable";
         }
       };
       const startInsightLifecycle = () => {
@@ -107,11 +111,15 @@ export function createChatApplication({
         insightLifecycleStarted = true;
         stream.emitInsight({ status: "generating", generation: insightGeneration });
       };
-      const failCurrentInsightLifecycle = async () => {
+      const emitInsightFailure = () => {
         if (!insightLifecycleStarted || insightLifecycleFinalized) return;
-        if (!(await activateInsightRequest())) return;
         insightLifecycleFinalized = true;
         stream.emitInsight({ status: "failed", generation: insightGeneration });
+      };
+      const failCurrentInsightLifecycle = async () => {
+        if (!insightLifecycleStarted || insightLifecycleFinalized) return;
+        if ((await activateInsightRequest()) === "superseded") return;
+        emitInsightFailure();
       };
       stream.emitStatus("governance");
       const governanceResult = await governanceAgent.review({
@@ -143,7 +151,7 @@ export function createChatApplication({
               ? async (intent) => {
                   insightPlanObserved = true;
                   if (shouldGenerateInsight(intent)) {
-                    insightRequestActive = await activateInsightRequest();
+                    insightRequestActive = (await activateInsightRequest()) === "active";
                     if (insightRequestActive) startInsightLifecycle();
                   }
                 }
@@ -153,11 +161,13 @@ export function createChatApplication({
               ? async (analysis) => {
                   if (!shouldGenerateInsight(analysis.intent)) return null;
                   if (!insightPlanObserved) {
-                    insightRequestActive = await activateInsightRequest();
+                    insightRequestActive = (await activateInsightRequest()) === "active";
                     if (insightRequestActive) startInsightLifecycle();
                   }
                   if (insightRequestActive) {
-                    insightRequestActive = await activateInsightRequest();
+                    const activation = await activateInsightRequest();
+                    insightRequestActive = activation === "active";
+                    if (activation === "unavailable") emitInsightFailure();
                   }
                   if (!insightRequestActive) return null;
                   try {
@@ -165,7 +175,6 @@ export function createChatApplication({
                       insightToken,
                       analysis
                     );
-                    if (!(await activateInsightRequest())) return null;
                     insightLifecycleFinalized = true;
                     stream.emitInsight({
                       status: "updated",
@@ -177,13 +186,13 @@ export function createChatApplication({
                     return { content: buildInsightReceipt(snapshot) };
                   } catch (error) {
                     if (error instanceof StaleInsightGenerationError) return null;
-                    if (!(await activateInsightRequest())) return null;
+                    const activation = await activateInsightRequest();
+                    if (activation === "superseded") return null;
                     console.error(
                       "Insight projection failed:",
                       error instanceof Error ? error.name : "UnknownError"
                     );
-                    insightLifecycleFinalized = true;
-                    stream.emitInsight({ status: "failed", generation: insightGeneration });
+                    emitInsightFailure();
                     return null;
                   }
                 }

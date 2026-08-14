@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
-import type { FileHandle } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import type { InsightGenerationToken } from "./insight-generation-guard";
 import type { InsightAction, InsightSnapshot } from "./insight-types";
 
@@ -37,8 +35,6 @@ interface LatestInsightRegistryFile {
 }
 
 const sharedWriteQueues = new Map<string, Promise<unknown>>();
-const LOCK_RETRY_MS = 10;
-const LOCK_TIMEOUT_MS = 5_000;
 
 export interface LatestInsightRepository {
   findByUserId(userId: string): Promise<InsightSnapshot | null>;
@@ -233,8 +229,8 @@ export class FileLatestInsightRepository implements LatestInsightRepository {
     const key = resolve(this.filePath);
     const previous = sharedWriteQueues.get(key) || Promise.resolve();
     const result = previous.then(
-      () => withFileLock(key, operation),
-      () => withFileLock(key, operation)
+      operation,
+      operation
     );
     const settled = result.then(
       () => undefined,
@@ -245,123 +241,6 @@ export class FileLatestInsightRepository implements LatestInsightRepository {
       if (sharedWriteQueues.get(key) === settled) sharedWriteQueues.delete(key);
     });
     return result;
-  }
-}
-
-async function withFileLock<T>(
-  filePath: string,
-  operation: () => Promise<T>
-): Promise<T> {
-  await mkdir(dirname(filePath), { recursive: true });
-  const lockPath = `${filePath}.lock`;
-  const owner = `${process.pid}:${randomUUID()}`;
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  let handle: FileHandle | undefined;
-  while (!handle) {
-    try {
-      const candidate = await open(lockPath, "wx");
-      try {
-        await candidate.writeFile(owner, "utf8");
-        handle = candidate;
-      } catch (error) {
-        await candidate.close().catch(() => undefined);
-        await rm(lockPath, { force: true }).catch(() => undefined);
-        throw error;
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      await reclaimDeadProcessLock(lockPath);
-      if (Date.now() >= deadline) {
-        throw new Error("Timed out waiting for the latest insight repository lock.");
-      }
-      await delay(LOCK_RETRY_MS);
-    }
-  }
-
-  let operationFailed = false;
-  let operationError: unknown;
-  let result: T | undefined;
-  try {
-    result = await operation();
-  } catch (error) {
-    operationFailed = true;
-    operationError = error;
-  }
-  const cleanupError = await releaseFileLock(handle, lockPath, owner);
-  if (operationFailed) {
-    attachCleanupError(operationError, cleanupError);
-    throw operationError;
-  }
-  if (cleanupError) {
-    console.error(
-      "Latest insight lock cleanup failed:",
-      cleanupError instanceof Error ? cleanupError.name : "UnknownError"
-    );
-  }
-  return result as T;
-}
-
-async function reclaimDeadProcessLock(lockPath: string): Promise<void> {
-  const reaperPath = `${lockPath}.reap`;
-  let reaper: FileHandle;
-  try {
-    reaper = await open(reaperPath, "wx");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
-    throw error;
-  }
-
-  try {
-    const owner = await readFile(lockPath, "utf8").catch((error) => {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    });
-    const ownerPid = owner ? Number.parseInt(owner.split(":", 1)[0], 10) : NaN;
-    if (Number.isSafeInteger(ownerPid) && ownerPid > 0 && !isProcessAlive(ownerPid)) {
-      await rm(lockPath, { force: true });
-    }
-  } finally {
-    await reaper.close().catch(() => undefined);
-    await rm(reaperPath, { force: true }).catch(() => undefined);
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
-  }
-}
-
-async function releaseFileLock(
-  handle: FileHandle,
-  lockPath: string,
-  owner: string
-): Promise<unknown | null> {
-  try {
-    await handle.close();
-    const currentOwner = await readFile(lockPath, "utf8").catch((error) => {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    });
-    if (currentOwner === owner) await rm(lockPath, { force: true });
-    return null;
-  } catch (error) {
-    return error;
-  }
-}
-
-function attachCleanupError(error: unknown, cleanupError: unknown | null): void {
-  if (!(error instanceof Error) || !cleanupError) return;
-  try {
-    Object.defineProperty(error, "lockCleanupError", {
-      configurable: true,
-      value: cleanupError,
-    });
-  } catch {
-    // Lock cleanup metadata must never replace the original operation failure.
   }
 }
 

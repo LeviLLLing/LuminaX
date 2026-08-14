@@ -9,7 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
 import {
   FileLatestInsightRepository,
@@ -82,32 +82,12 @@ test("a persisted newer generation claim rejects a stale cross-instance replacem
   assert.equal(await newerRepository.findByUserId("u2"), null);
 });
 
-test("repository reclaims a lock only when its owner process is gone", async () => {
+test("repository serializes same-process instances without losing users", async () => {
   const file = join(await createTemporaryDirectory(), "latest.json");
-  await writeFile(`${file}.lock`, "2147483647:orphan", "utf8");
-  const repository = new FileLatestInsightRepository(file);
-
-  assert.equal(
-    await repository.claimGeneration({
-      userId: "u1",
-      requestId: "current",
-      startedAt: 1,
-    }),
-    true
-  );
-  assert.deepEqual(
-    (await readdir(dirname(file))).filter((name) => name.endsWith(".lock")),
-    []
-  );
-});
-
-test("repository serializes concurrent replacements without losing users", async () => {
-  const file = join(await createTemporaryDirectory(), "latest.json");
-  const repository = new FileLatestInsightRepository(file);
 
   await Promise.all(
     ["u1", "u2", "u3"].map((userId) =>
-      repository.replaceForUser(
+      new FileLatestInsightRepository(file).replaceForUser(
         createSnapshot({
           id: `insight-${userId}`,
           sourceFingerprint: `fingerprint-${userId}`,
@@ -120,7 +100,7 @@ test("repository serializes concurrent replacements without losing users", async
   assert.deepEqual(
     await Promise.all(
       ["u1", "u2", "u3"].map(async (userId) =>
-        (await repository.findByUserId(userId))?.id
+        (await new FileLatestInsightRepository(file).findByUserId(userId))?.id
       )
     ),
     ["insight-u1", "insight-u2", "insight-u3"]
