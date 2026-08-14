@@ -38,6 +38,8 @@ export async function handleChatHttpRequest(
       contentStreamed = true;
       queue.push(encodeEvent({ type: "content", content: delta }));
     },
+    emitInsight: (event) =>
+      queue.push(encodeEvent({ type: "insight", ...event })),
   };
 
   // 执行与流式事件并行：execute 期间通过 callbacks 实时入队；

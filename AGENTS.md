@@ -12,7 +12,7 @@
 
 ## Architecture Boundaries
 ### Routes and adapters
-- `src/app/api/chat/route.ts` delegates `POST` to `handleChatHttpRequest` in `src/modules/chat/chat-http-adapter.ts`; the adapter authenticates the request, calls `chatApplication.execute`, and preserves the SSE response from `streamChatResponse`.
+- `src/app/api/chat/route.ts` delegates `POST` to `handleChatHttpRequest` in `src/modules/chat/chat-http-adapter.ts`; `handleChatHttpRequest` queues live SSE callbacks from `chatApplication.execute` and emits status, insight, content, and intent events without changing their existing payloads.
 - `src/app/api/data/route.ts` authenticates, loads `salesDataRepository`, and projects it with `accessControl.filterSalesData`.
 - `src/app/api/workbench/context/route.ts` exposes the authenticated, non-cacheable workbench context without returning raw table, column, SQL, or credential details.
 - `src/app/api/auth/login/route.ts`, `logout/route.ts`, and `me/route.ts` are the public session endpoints. `src/app/api/admin/metrics/route.ts` and `src/app/api/admin/permissions/route.ts` validate action payloads and require `authorizeAdminRequest`.
@@ -22,11 +22,20 @@
 - `authApplication` in `src/modules/auth/auth-composition.ts` implements `AuthApplication` from `src/modules/auth/auth-application.ts`; `authenticateRequest` is the HTTP-facing session helper in `src/modules/auth/auth-http.ts`.
 - `permissionAdminApplication` in `src/modules/admin/permissions/permission-composition.ts` and `metricAdminApplication` in `src/modules/admin/metrics/metric-composition.ts` are the administration use cases.
 - `workbenchContextApplication` in `src/modules/workbench/workbench-composition.ts` resolves role templates and projects existing metric and data permissions into the client-safe `WorkbenchContext` contract.
+- The Business Agent exposes authorized structured analysis through `onAnalysisReady` before full answer generation. The chat application may project that result into a latest insight and otherwise continues the existing answer path.
 
 ### Agents
 - Runtime chat composition in `src/modules/chat/chat-composition.ts` creates Governance, Business, and Attribution Agents with separate `DeepSeekChatModel` and `InMemoryAgentMemory` instances.
 - Public factories are `createGovernanceAgent`, `createBusinessAgent`, `createAttributionAgent`, and `createMetricSqlAuthoringAgent` under `src/modules/agents/`.
 - Shared contracts are `AgentModel` and `AgentMemory` in `src/modules/agents/shared/`; DeepSeek transport is `DeepSeekChatModel`.
+- `InsightComposer` is a projection component, not a fourth runtime Agent. It uses `DEEPSEEK_INSIGHT_MODEL || DEEPSEEK_MODEL || deepseek-v4-flash`, has no Agent memory, does not access the database, and never calculates metrics.
+
+### Insight projection
+- `InsightApplication` consumes only authorized structured analysis. `InsightComposer` may select catalog IDs and draft hypotheses or actions, while the validator derives every persisted headline, finding title, finding summary, and observed fact from the deterministic SQL source catalog.
+- `LatestInsightRepository` defaults to `.luminax/latest-insights.json`. The file repository persists per-user generation tokens and serializes all instances in the local Node process. It is intentionally a single-process POC store; horizontal or multi-process deployment must replace it with a MySQL CAS implementation through the same interface.
+- `GET /api/insights/latest` restores the current user's latest snapshot. `PATCH /api/insights/latest/actions/:actionId` updates one action using the current insight ID for optimistic concurrency.
+- Both routes reauthorize the exact stored table, column, and store requirements before returning or mutating a snapshot. Authorization failure hides the full snapshot rather than returning a partial result.
+- Insight generation adds `generating`, `updated`, and `failed` lifecycle events to SSE. New events carry an optional `generation` reference for wire compatibility, and the client rejects events older than the latest observed generation. A triggerable analysis starts its lifecycle when its token is persisted before SQL; every current-request exit reaches `updated` or `failed`, while superseded requests exit silently.
 
 ### Metrics and SQL
 - Fixed metric execution uses `SqlMetricQueryExecutor.execute(intent, scope)` from `src/modules/metrics/sql-metric-query-executor.ts`, implemented by `MySqlSqlMetricQueryExecutor` in `src/modules/metrics/sql/mysql-sql-metric-query-executor.ts`.
@@ -43,7 +52,7 @@
 - `src/modules/reports/sql-report-formatter.ts` formats SQL-backed report results. Dashboard chart options are built by `buildDashboardChartOptions` in `src/modules/visualization/chart-options.ts` for the ECharts UI.
 
 ### Runtime repositories
-- `.luminax/` is ignored local runtime state. `FilePermissionRepository`, `FileMetricDefinitionRepository`, `FileCredentialRepository`, and `SessionManager` use it by default for access control, metric registry, credentials, and the session secret.
+- `.luminax/` is ignored local runtime state. `FilePermissionRepository`, `FileMetricDefinitionRepository`, `FileCredentialRepository`, `LatestInsightRepository`, and `SessionManager` use it by default for access control, metric registry, credentials, latest insights, and the session secret.
 - `SalesDataSource` in `src/modules/data-source/data-source.ts` is the adapter contract. JSON, MySQL, and SQL Server implementations are selected by `createSalesDataSource`; fixed metric execution remains MySQL-backed.
 
 ## Non-Negotiable Data Rules
@@ -79,6 +88,7 @@
 - Keep operational screens dense, calm, scan-friendly, and responsive from 360px upward.
 - Use Lucide icons for familiar actions and tooltips for unfamiliar icon-only controls.
 - Do not nest cards, add decorative orbs, or use marketing-page composition in the workbench.
+- The internal `analysis` view ID remains stable but presents “洞察与行动”. Overview and Report keep independent data and rendering paths.
 
 ## Security
 - Never commit `.env.local`, `.luminax/`, `.superpowers/`, logs, API keys, database passwords, session keys, or credential files.

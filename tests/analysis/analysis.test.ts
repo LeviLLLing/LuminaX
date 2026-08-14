@@ -6,6 +6,7 @@ import {
 } from "../../src/modules/analysis/analysis-registry";
 import { createAnalysisSnapshot } from "../../src/modules/analytics/analysis-snapshot";
 import { JsonSalesDataSource } from "../../src/modules/data-source/json-sales-data-source";
+import { formatAttribution } from "../../src/modules/chat/answer-formatters/attribution";
 
 const jsonDataSource = new JsonSalesDataSource();
 
@@ -63,4 +64,29 @@ test("analysis registry formats SQL metric results without calculating", () => {
 
   assert.ok(listAnalysisDefinitions().length >= 10);
   assert.ok(formatted && formatted.length > 20);
+});
+
+test("attribution store comparison formats numeric rates as percentages", () => {
+  const formatted = formatAttribution({
+    salesSummary: { totalSales: 95_000, totalTarget: 107_710, achievementRate: 88.2, totalOrders: 1_800, avgOrderValue: 52.78 },
+    orderVsAov: { avgDailySales: 13_571, avgDailyOrders: 257, avgAOV: 52.78, actualDailySales: 13_571, actualDailyOrders: 257, salesDrop: 0, ordersDrop: 0, aovDrop: 0, mainIssue: "none" },
+    refundSummary: { totalRefund: 4_100, totalCancelled: 27, refundRate: 4.3 },
+    managerFeedback: [],
+    channelBreakdown: {},
+    categoryBreakdown: {},
+    daypartBreakdown: {},
+    channelDaily: [],
+    dailyDetail: [],
+    refundDaily: [],
+    refundByStore: [],
+    promotionSummary: { totalDiscount: 0, totalPromoUnits: 0, promoCount: 0, topPromotions: [] },
+    dateRange: { start: "2026-08-01", end: "2026-08-07" },
+    storeIds: ["S001"],
+    storeNames: { S001: "东店" },
+    storeComparison: {
+      stores: [{ storeId: "S001", storeName: "东店", totalSales: 95_000, totalTarget: 107_710, achievementRate: 88.2, totalOrders: 1_800, avgOrderValue: 52.78, refundRate: 4.3 }],
+    },
+  });
+
+  assert.match(formatted, /\| 东店（S001） .*\| 88\.20% \|.*\| 4\.30% \|/);
 });

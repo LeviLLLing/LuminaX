@@ -1,6 +1,6 @@
 "use client";
 
-import { AnalysisPanel } from "@/components/luminax/workbench/AnalysisPanel";
+import { InsightActionPanel } from "@/components/luminax/workbench/InsightActionPanel";
 import { OverviewPanel } from "@/components/luminax/workbench/OverviewPanel";
 import { ReportView } from "@/components/luminax/workbench/ReportView";
 import type { DataSummary } from "@/modules/domain/analysis-types";
@@ -10,6 +10,7 @@ import type {
 import { getWorkbenchCopy } from "@/modules/workbench/workbench-presentation";
 import type { WorkbenchTemplateId } from "@/modules/workbench/workbench-types";
 import type { DashboardChartOptions } from "@/modules/visualization/chart-theme";
+import type { InsightScope, InsightSnapshotDto } from "@/modules/insights/insight-types";
 import { cn } from "@/lib/utils";
 
 interface InsightCanvasProps {
@@ -19,14 +20,22 @@ interface InsightCanvasProps {
   dataSummary: DataSummary | null;
   chartOptions: DashboardChartOptions;
   reportHTML: string;
-  analysisContent: string;
-  isAnalyzing: boolean;
+  insight: InsightSnapshotDto | null;
+  insightLoading: boolean;
+  insightError: string | null;
+  insightGenerationStatus: "idle" | "generating" | "failed";
+  pendingInsightActionIds: string[];
+  activeInsightScope: Omit<InsightScope, "comparisonLabel">;
+  suggestions: string[];
+  onAskQuestion(question: string): void;
+  onApplyInsightScope(scope: InsightScope): boolean;
+  onToggleInsightAction(actionId: string, completed: boolean): Promise<void>;
   onViewChange(view: InsightView): void;
 }
 
 const VIEW_TABS: ReadonlyArray<{ view: InsightView; label: string }> = [
   { view: "overview", label: "经营概览" },
-  { view: "analysis", label: "经营分析" },
+  { view: "analysis", label: "洞察与行动" },
   { view: "report", label: "经营周报" },
 ];
 
@@ -37,8 +46,16 @@ export function InsightCanvas({
   dataSummary,
   chartOptions,
   reportHTML,
-  analysisContent,
-  isAnalyzing,
+  insight,
+  insightLoading,
+  insightError,
+  insightGenerationStatus,
+  pendingInsightActionIds,
+  activeInsightScope,
+  suggestions,
+  onAskQuestion,
+  onApplyInsightScope,
+  onToggleInsightAction,
   onViewChange,
 }: InsightCanvasProps) {
   const { title } = getWorkbenchCopy(templateId);
@@ -87,12 +104,17 @@ export function InsightCanvas({
         />
       )}
       {view === "analysis" && (
-        <AnalysisPanel
-          availableMetricCodes={availableMetricCodes}
-          dataSummary={dataSummary}
-          chartOptions={chartOptions}
-          analysisContent={analysisContent}
-          isAnalyzing={isAnalyzing}
+        <InsightActionPanel
+          insight={insight}
+          isLoading={insightLoading}
+          error={insightError}
+          generationStatus={insightGenerationStatus}
+          pendingActionIds={pendingInsightActionIds}
+          activeScope={activeInsightScope}
+          suggestions={suggestions}
+          onAskQuestion={onAskQuestion}
+          onApplyScope={onApplyInsightScope}
+          onToggleAction={onToggleInsightAction}
         />
       )}
       {view === "report" &&

@@ -50,10 +50,10 @@ export function formatAttribution(data: Record<string, unknown>): string {
           storeName: string;
           totalSales: number;
           totalTarget: number;
-          achievementRate: string;
+          achievementRate: number;
           totalOrders: number;
           avgOrderValue: number;
-          refundRate: string;
+          refundRate: number;
         }>;
       };
     }
@@ -71,9 +71,9 @@ export function formatAttribution(data: Record<string, unknown>): string {
         (store) =>
           `| ${store.storeName}（${store.storeId}） | ${money(
             store.totalSales
-          )} | ${money(store.totalTarget)} | ${store.achievementRate} | ${num(
+          )} | ${money(store.totalTarget)} | ${pct(store.achievementRate)} | ${num(
             store.totalOrders
-          )} | ${money(store.avgOrderValue)} | ${store.refundRate} |`
+          )} | ${money(store.avgOrderValue)} | ${pct(store.refundRate)} |`
       ),
       ""
     );

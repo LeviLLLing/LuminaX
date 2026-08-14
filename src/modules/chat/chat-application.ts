@@ -13,6 +13,12 @@ import {
   NOOP_CHAT_STREAM,
   type ChatStreamCallbacks,
 } from "@/modules/chat/chat-stream";
+import {
+  StaleInsightGenerationError,
+  buildInsightReceipt,
+  type InsightApplication,
+} from "@/modules/insights/insight-application";
+import { shouldGenerateInsight } from "@/modules/insights/insight-trigger-policy";
 
 export interface ChatCommand {
   question: string;
@@ -39,6 +45,7 @@ export interface ChatApplication {
 export interface ChatApplicationDependencies {
   governanceAgent: GovernanceAgent;
   businessAgent: BusinessAgent;
+  insightApplication?: InsightApplication;
 }
 
 export class ChatApplicationError extends Error {
@@ -58,6 +65,7 @@ export class ChatApplicationError extends Error {
 export function createChatApplication({
   governanceAgent,
   businessAgent,
+  insightApplication,
 }: ChatApplicationDependencies): ChatApplication {
   return {
     async execute(command) {
@@ -70,7 +78,49 @@ export function createChatApplication({
       }
 
       const sessionId = command.sessionId?.trim() || randomUUID();
+      const userId = command.userId?.trim() || "system-admin";
       const stream = command.stream || NOOP_CHAT_STREAM;
+      const insightToken = insightApplication
+        ? insightApplication.beginRequest(userId, randomUUID(), Date.now())
+        : null;
+      const insightGeneration = insightToken
+        ? { requestId: insightToken.requestId, startedAt: insightToken.startedAt }
+        : undefined;
+      let insightPlanObserved = false;
+      let insightRequestActive = false;
+      let insightLifecycleStarted = false;
+      let insightLifecycleFinalized = false;
+      const activateInsightRequest = async (): Promise<
+        "active" | "superseded" | "unavailable"
+      > => {
+        if (!insightApplication || !insightToken) return "superseded";
+        try {
+          return (await insightApplication.activateRequest(insightToken))
+            ? "active"
+            : "superseded";
+        } catch (error) {
+          console.error(
+            "Insight generation claim failed:",
+            error instanceof Error ? error.name : "UnknownError"
+          );
+          return "unavailable";
+        }
+      };
+      const startInsightLifecycle = () => {
+        if (!insightGeneration || insightLifecycleStarted) return;
+        insightLifecycleStarted = true;
+        stream.emitInsight({ status: "generating", generation: insightGeneration });
+      };
+      const emitInsightFailure = () => {
+        if (!insightLifecycleStarted || insightLifecycleFinalized) return;
+        insightLifecycleFinalized = true;
+        stream.emitInsight({ status: "failed", generation: insightGeneration });
+      };
+      const failCurrentInsightLifecycle = async () => {
+        if (!insightLifecycleStarted || insightLifecycleFinalized) return;
+        if ((await activateInsightRequest()) === "superseded") return;
+        emitInsightFailure();
+      };
       stream.emitStatus("governance");
       const governanceResult = await governanceAgent.review({
         sessionId,
@@ -89,15 +139,69 @@ export function createChatApplication({
 
       stream.emitStatus("computing");
       try {
-        return await businessAgent.execute({
+        const result = await businessAgent.execute({
           ...governanceResult.handoff,
-          userId: command.userId?.trim() || "system-admin",
+          userId,
           storeIds: command.storeIds,
           startDate: command.startDate,
           endDate: command.endDate,
           stream,
+          onAnalysisPlanned:
+            insightApplication && insightToken
+              ? async (intent) => {
+                  insightPlanObserved = true;
+                  if (shouldGenerateInsight(intent)) {
+                    insightRequestActive = (await activateInsightRequest()) === "active";
+                    if (insightRequestActive) startInsightLifecycle();
+                  }
+                }
+              : undefined,
+          onAnalysisReady:
+            insightApplication && insightToken
+              ? async (analysis) => {
+                  if (!shouldGenerateInsight(analysis.intent)) return null;
+                  if (!insightPlanObserved) {
+                    insightRequestActive = (await activateInsightRequest()) === "active";
+                    if (insightRequestActive) startInsightLifecycle();
+                  }
+                  if (insightRequestActive) {
+                    const activation = await activateInsightRequest();
+                    insightRequestActive = activation === "active";
+                    if (activation === "unavailable") emitInsightFailure();
+                  }
+                  if (!insightRequestActive) return null;
+                  try {
+                    const snapshot = await insightApplication.generateForAnalysis(
+                      insightToken,
+                      analysis
+                    );
+                    insightLifecycleFinalized = true;
+                    stream.emitInsight({
+                      status: "updated",
+                      insightId: snapshot.id,
+                      findingCount: snapshot.findings.length,
+                      actionCount: snapshot.actions.length,
+                      generation: insightGeneration,
+                    });
+                    return { content: buildInsightReceipt(snapshot) };
+                  } catch (error) {
+                    if (error instanceof StaleInsightGenerationError) return null;
+                    const activation = await activateInsightRequest();
+                    if (activation === "superseded") return null;
+                    console.error(
+                      "Insight projection failed:",
+                      error instanceof Error ? error.name : "UnknownError"
+                    );
+                    emitInsightFailure();
+                    return null;
+                  }
+                }
+              : undefined,
         });
+        await failCurrentInsightLifecycle();
+        return result;
       } catch (error) {
+        await failCurrentInsightLifecycle();
         if (
           error instanceof BusinessAgentError &&
           error.code === "DATA_NOT_LOADED"

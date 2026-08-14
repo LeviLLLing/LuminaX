@@ -1,4 +1,4 @@
-import { money, num } from "@/modules/chat/answer-formatters/format-utils";
+import { money, num, pct } from "@/modules/chat/answer-formatters/format-utils";
 
 export function formatCompare(data: Record<string, unknown>): string {
   const stores = data.stores as Array<{
@@ -6,10 +6,10 @@ export function formatCompare(data: Record<string, unknown>): string {
     storeName: string;
     totalSales: number;
     totalTarget: number;
-    achievementRate: string;
+    achievementRate: number;
     totalOrders: number;
     avgOrderValue: number;
-    refundRate: string;
+    refundRate: number;
   }>;
 
   return [
@@ -19,9 +19,9 @@ export function formatCompare(data: Record<string, unknown>): string {
     `|---${stores.map(() => "|---:").join("")}|`,
     `| 销售额 | ${stores.map((store) => money(store.totalSales)).join(" | ")} |`,
     `| 目标 | ${stores.map((store) => money(store.totalTarget)).join(" | ")} |`,
-    `| 达成率 | ${stores.map((store) => store.achievementRate).join(" | ")} |`,
+    `| 达成率 | ${stores.map((store) => pct(store.achievementRate)).join(" | ")} |`,
     `| 订单量 | ${stores.map((store) => num(store.totalOrders)).join(" | ")} |`,
     `| 客单价 | ${stores.map((store) => money(store.avgOrderValue)).join(" | ")} |`,
-    `| 退款率 | ${stores.map((store) => store.refundRate).join(" | ")} |`,
+    `| 退款率 | ${stores.map((store) => pct(store.refundRate)).join(" | ")} |`,
   ].join("\n");
 }

@@ -1,4 +1,5 @@
 import type { AnalysisIntent } from "@/modules/domain/analysis-types";
+import type { InsightScope } from "@/modules/insights/insight-types";
 import type {
   WorkbenchContext,
   WorkbenchIntent,
@@ -6,6 +7,24 @@ import type {
 } from "./workbench-types";
 
 export type InsightView = "overview" | "analysis" | "report";
+export interface ActiveInsightScope {
+  storeIds: string[];
+  startDate: string;
+  endDate: string;
+}
+
+export function isInsightScopeActive(
+  current: ActiveInsightScope,
+  insight: InsightScope
+): boolean {
+  return current.startDate === insight.startDate &&
+    current.endDate === insight.endDate &&
+    normalizedStoreIds(current.storeIds).join("\u0000") === normalizedStoreIds(insight.storeIds).join("\u0000");
+}
+
+function normalizedStoreIds(storeIds: readonly string[]): string[] {
+  return [...new Set(storeIds)].sort();
+}
 export type InsightSectionId =
   | "totalSales"
   | "achievement"

@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import type { ChatMessage } from "@/modules/domain/ui-types";
+import type { InsightStreamEvent } from "@/modules/insights/insight-types";
 import {
   CHAT_STATUS_LABELS,
   ChatStreamError,
@@ -23,9 +24,10 @@ const INITIAL_MESSAGES: ChatMessage[] = [
 
 interface UseChatStreamInput {
   onIntentMetadata: (metadata: IntentViewMetadata) => void;
+  onInsightEvent?: (event: InsightStreamEvent) => void;
 }
 
-export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
+export function useChatStream({ onIntentMetadata, onInsightEvent }: UseChatStreamInput) {
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [inputValue, setInputValue] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -60,6 +62,7 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
         { question, sessionId },
         {
           onIntent: onIntentMetadata,
+          onInsight: onInsightEvent,
           onContent: (content) => {
             setMessages((prev) =>
               replaceLastMessage(prev, {
@@ -102,7 +105,7 @@ export function useChatStream({ onIntentMetadata }: UseChatStreamInput) {
       setIsStreaming(false);
       streamAbortRef.current = null;
     }
-  }, [inputValue, isStreaming, onIntentMetadata, sessionId]);
+  }, [inputValue, isStreaming, onInsightEvent, onIntentMetadata, sessionId]);
 
   return {
     chatAreaRef,

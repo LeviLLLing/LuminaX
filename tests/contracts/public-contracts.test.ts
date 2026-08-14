@@ -15,6 +15,9 @@ import { streamChatResponse } from "../../src/modules/chat/sse-response";
 import { DataAccessDeniedError } from "../../src/modules/admin/permissions/access-control";
 import { createPostWeeklyReportHandler } from "../../src/app/api/reports/weekly/route";
 import type { AuthenticatedUser } from "../../src/modules/auth/auth-types";
+import { createGetLatestInsightHandler } from "../../src/app/api/insights/latest/route";
+import { createPatchInsightActionHandler } from "../../src/app/api/insights/latest/actions/[actionId]/route";
+import { toInsightSnapshotDto, type InsightSnapshot } from "../../src/modules/insights/insight-types";
 
 test("public chat SSE wire format remains stable", async () => {
   const response = streamChatResponse(
@@ -42,6 +45,62 @@ test("public chat SSE wire format remains stable", async () => {
     'data: {"type":"intent","intent":"achievement_rate","storeIds":["S001"],"startDate":"2025-05-01","endDate":"2025-05-14"}\n\n' +
       'data: {"type":"content","content":"分析完成"}\n\n' +
       "data: [DONE]\n\n"
+  );
+});
+
+test("chat HTTP adapter adds insight events without changing existing payloads", async (context) => {
+  context.mock.method(authApplication, "authenticateSession", async () => ({
+    id: "contract-user",
+    username: "contract-user",
+    displayName: "Contract User",
+    role: "analyst",
+  }));
+  const application: ChatApplication = {
+    async execute(command) {
+      command.stream?.emitStatus("computing");
+      command.stream?.emitInsight({ status: "generating" });
+      command.stream?.emitInsight({
+        status: "updated",
+        insightId: "insight-1",
+        findingCount: 3,
+        actionCount: 2,
+      });
+      command.stream?.emitContent("洞察与行动已更新");
+      return {
+        intentResult: {
+          intent: "compare",
+          storeIds: ["S001"],
+          startDate: null,
+          endDate: null,
+          relevant: true,
+          outOfScope: false,
+        },
+        content: "洞察与行动已更新",
+        storeIds: ["S001"],
+        startDate: "2025-05-01",
+        endDate: "2025-05-14",
+      };
+    },
+  };
+  const response = await handleChatHttpRequest(
+    new NextRequest("http://localhost/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=contract-session`,
+      },
+      body: JSON.stringify({ question: "对比门店表现" }),
+    }),
+    application
+  );
+
+  assert.equal(
+    await response.text(),
+    'data: {"type":"status","status":"computing"}\n\n' +
+      'data: {"type":"insight","status":"generating"}\n\n' +
+      'data: {"type":"insight","status":"updated","insightId":"insight-1","findingCount":3,"actionCount":2}\n\n' +
+      'data: {"type":"content","content":"洞察与行动已更新"}\n\n' +
+      'data: {"type":"intent","intent":"compare","storeIds":["S001"],"startDate":"2025-05-01","endDate":"2025-05-14"}\n\n'
   );
 });
 
@@ -231,6 +290,84 @@ test("weekly report API enforces authentication, payload and permission contract
     html: "<!DOCTYPE html><p>report</p>",
   });
   assert.equal(allowed.headers.get("Cache-Control"), "no-store");
+});
+
+test("latest insight API excludes server-only identity and authorization fields", async () => {
+  const snapshot: InsightSnapshot = {
+    id: "insight-contract",
+    userId: "private-user",
+    sourceQuestion: "Compare stores",
+    sourceIntent: "compare",
+    scope: { storeIds: ["S001"], startDate: "2026-08-01", endDate: "2026-08-07", comparisonLabel: null },
+    headline: "Store performance",
+    findings: [],
+    evidence: [],
+    verificationItems: [],
+    actions: [],
+    accessRequirements: [{ tableName: "store_sales_daily", columns: ["store_id"] }],
+    sourceFingerprint: "private-fingerprint",
+    createdAt: "2026-08-13T00:00:00.000Z",
+    updatedAt: "2026-08-13T00:00:00.000Z",
+  };
+  const response = await createGetLatestInsightHandler({
+    authenticate: async () => ({ id: "private-user", username: "user", displayName: "User", role: "analyst" }),
+    getLatest: async () => toInsightSnapshotDto(snapshot),
+  })(new NextRequest("http://localhost/api/insights/latest"));
+  const body = await response.json() as { insight: Record<string, unknown> };
+  assert.equal("userId" in body.insight, false);
+  assert.equal("accessRequirements" in body.insight, false);
+  assert.equal("sourceFingerprint" in body.insight, false);
+});
+
+test("latest insight action API preserves authenticated public contract", async () => {
+  const snapshot: InsightSnapshot = {
+    id: "insight-contract",
+    userId: "private-user",
+    sourceQuestion: "Compare stores",
+    sourceIntent: "compare",
+    scope: { storeIds: ["S001"], startDate: "2026-08-01", endDate: "2026-08-07", comparisonLabel: null },
+    headline: "Store performance",
+    findings: [],
+    evidence: [],
+    verificationItems: [],
+    actions: [{
+      id: "action-contract",
+      priority: "P0",
+      title: "Review store performance",
+      ownerRole: "数据分析",
+      verificationMetricCode: "sales_amount",
+      verificationMetricLabel: "Sales amount",
+      completed: true,
+      completedAt: "2026-08-13T01:00:00.000Z",
+    }],
+    accessRequirements: [{ tableName: "store_sales_daily", columns: ["store_id"] }],
+    sourceFingerprint: "private-fingerprint",
+    createdAt: "2026-08-13T00:00:00.000Z",
+    updatedAt: "2026-08-13T01:00:00.000Z",
+  };
+  const response = await createPatchInsightActionHandler({
+    authenticate: async () => ({ id: "private-user", username: "user", displayName: "User", role: "analyst" }),
+    updateAction: async (input) => {
+      assert.deepEqual(input, {
+        userId: "private-user",
+        insightId: "insight-contract",
+        actionId: "action-contract",
+        completed: true,
+      });
+      return toInsightSnapshotDto(snapshot);
+    },
+  })(new NextRequest("http://localhost/api/insights/latest/actions/action-contract", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ insightId: "insight-contract", completed: true }),
+  }), { params: Promise.resolve({ actionId: "action-contract" }) });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  const body = await response.json() as { insight: Record<string, unknown> };
+  assert.equal("userId" in body.insight, false);
+  assert.equal("accessRequirements" in body.insight, false);
+  assert.equal("sourceFingerprint" in body.insight, false);
 });
 
 function assertCookie(

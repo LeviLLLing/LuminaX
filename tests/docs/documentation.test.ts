@@ -5,7 +5,7 @@ import test from "node:test";
 test("project instructions describe the current architecture", async () => {
   const agents = await readFile("AGENTS.md", "utf8");
   assertIncludesAll(agents, [
-    "`src/app/api/chat/route.ts` delegates `POST` to `handleChatHttpRequest`",
+    "`handleChatHttpRequest` queues live SSE callbacks",
     "Runtime chat composition in `src/modules/chat/chat-composition.ts` creates Governance, Business, and Attribution Agents with separate `DeepSeekChatModel` and `InMemoryAgentMemory` instances.",
     "Fixed and published custom metric values are calculated by SQL, not by an Agent.",
     "Every data request is authorized on the server by table, column, and store value.",
@@ -14,6 +14,26 @@ test("project instructions describe the current architecture", async () => {
   ]);
   assert.doesNotMatch(agents, /所有数值计算由 JavaScript/);
   assert.doesNotMatch(agents, /聊天接口不依赖外部 LLM/);
+  assert.doesNotMatch(agents, /preserves the SSE response from `streamChatResponse`/);
+});
+
+test("agent instructions and architecture document the insight projection", async () => {
+  const [agents, architecture] = await Promise.all([
+    readFile("AGENTS.md", "utf8"),
+    readFile("docs/architecture.md", "utf8"),
+  ]);
+  const requiredText = [
+    "InsightComposer",
+    "LatestInsightRepository",
+    "GET /api/insights/latest",
+    "PATCH /api/insights/latest/actions/:actionId",
+    "DEEPSEEK_INSIGHT_MODEL",
+    "latest-insights.json",
+  ];
+
+  assertIncludesAll(agents, requiredText);
+  assertIncludesAll(architecture, requiredText);
+  assert.doesNotMatch(architecture, /through `streamChatResponse`/);
 });
 
 test("runbook and design guide contain approved contracts", async () => {
