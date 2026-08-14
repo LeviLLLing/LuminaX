@@ -322,26 +322,33 @@ test("authentication and permission failures clear a previously visible snapshot
   }
 });
 
-test("a stale action response cannot overwrite the latest toggle", async () => {
-  const pending: Array<(value: InsightSnapshotDto) => void> = [];
+test("same-action updates are ignored while the first save is pending", async () => {
+  const pending: Array<ReturnType<typeof deferred<InsightSnapshotDto>>> = [];
+  const sent: boolean[] = [];
   const controller = createLatestInsightStateController({
     fetchLatest: async () => insight,
-    updateAction: () => new Promise((resolve) => pending.push(resolve)),
+    updateAction: (input) => {
+      sent.push(input.completed);
+      const request = deferred<InsightSnapshotDto>();
+      pending.push(request);
+      return request.promise;
+    },
     now: () => "2026-08-13T01:00:00.000Z",
   });
   await controller.reload();
 
   const markComplete = controller.toggleAction("a1", true);
   const markIncomplete = controller.toggleAction("a1", false);
-  pending[1](insight);
-  await markIncomplete;
-  pending[0]({
-    ...insight,
-    actions: [{ ...insight.actions[0], completed: true, completedAt: "2026-08-13T01:00:00.000Z" }],
-  });
-  await markComplete;
+  await Promise.resolve();
+  assert.deepEqual(sent, [true]);
 
-  assert.equal(controller.getState().insight?.actions[0].completed, false);
+  assert.deepEqual(controller.getState().pendingActionIds, ["a1"]);
+  pending[0].resolve(actionResponse(insight, "a1", true));
+  await Promise.all([markComplete, markIncomplete]);
+
+  assert.deepEqual(sent, [true]);
+  assert.deepEqual(controller.getState().pendingActionIds, []);
+  assert.equal(controller.getState().insight?.actions[0].completed, true);
 });
 
 test("action authorization failures immediately hide the protected snapshot", async () => {

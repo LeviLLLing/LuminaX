@@ -458,6 +458,41 @@ test("business agent offers authorized SQL data before calling its answer model"
   assert.equal(model.requests.length, 0);
 });
 
+test("business agent announces a triggerable analysis before SQL work", async () => {
+  const order: string[] = [];
+  const executor = compareExecutor();
+  const agent = createBusinessAgent({
+    metricQueryExecutor: {
+      async listStoreIds() {
+        order.push("list-stores");
+        return executor.listStoreIds();
+      },
+      async execute(intent, scope) {
+        order.push("execute-sql");
+        return executor.execute(intent, scope);
+      },
+    },
+    model: new FakeAgentModel("business-model", () => "unused"),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  await agent.execute({
+    sessionId: "projection-planned",
+    question: "对比 S001 和 S002 的门店表现",
+    onAnalysisPlanned: async (intent) => {
+      order.push(`planned:${intent}`);
+    },
+    onAnalysisReady: async () => ({ content: "洞察已更新" }),
+  });
+
+  assert.deepEqual(order.slice(0, 3), [
+    "planned:compare",
+    "list-stores",
+    "execute-sql",
+  ]);
+});
+
 test("a null projection keeps the existing full-answer path", async () => {
   const content: string[] = [];
   const model = new FakeAgentModel("business-model", ({ onToken }) => {

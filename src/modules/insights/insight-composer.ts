@@ -62,22 +62,19 @@ function parseDraft(value: Record<string, unknown>): InsightDraft {
   const findings = array(value.findings);
   const verificationItems = array(value.verificationItems);
   const actions = array(value.actions);
-  if (!isString(value.headline) || findings.length < 3 || findings.length > 5 || verificationItems.length > 3 || actions.length < 2 || actions.length > 5) {
+  if (findings.length < 3 || findings.length > 5 || verificationItems.length > 3 || actions.length < 2 || actions.length > 5) {
     throw new InsightValidationError("INVALID_MODEL_OUTPUT");
   }
   return {
-    headline: value.headline,
     findings: findings.map((item) => {
       const sourceId = stringField(item, "sourceId");
-      const title = stringField(item, "title");
-      const summary = stringField(item, "summary");
       const severity = enumField(item, "severity", severities);
       const confidence = enumField(item, "confidence", confidences);
       const evidenceIds = stringArray(item.evidenceIds);
-      return { sourceId, title, summary, severity, confidence, evidenceIds };
+      return { sourceId, severity, confidence, evidenceIds };
     }),
     verificationItems: verificationItems.map((item) => ({
-      observedFact: stringField(item, "observedFact"),
+      sourceId: stringField(item, "sourceId"),
       hypothesis: stringField(item, "hypothesis"),
       requiredCheck: stringField(item, "requiredCheck"),
     })),

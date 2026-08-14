@@ -82,6 +82,8 @@ export function createChatApplication({
       const insightToken = insightApplication
         ? insightApplication.beginRequest(userId, randomUUID(), Date.now())
         : null;
+      let insightPlanObserved = false;
+      let insightRequestActive = false;
       stream.emitStatus("governance");
       const governanceResult = await governanceAgent.review({
         sessionId,
@@ -107,10 +109,27 @@ export function createChatApplication({
           startDate: command.startDate,
           endDate: command.endDate,
           stream,
+          onAnalysisPlanned:
+            insightApplication && insightToken
+              ? (intent) => {
+                  insightPlanObserved = true;
+                  if (shouldGenerateInsight(intent)) {
+                    insightRequestActive = insightApplication.activateRequest(
+                      insightToken
+                    );
+                  }
+                }
+              : undefined,
           onAnalysisReady:
             insightApplication && insightToken
               ? async (analysis) => {
                   if (!shouldGenerateInsight(analysis.intent)) return null;
+                  if (!insightPlanObserved) {
+                    insightRequestActive = insightApplication.activateRequest(
+                      insightToken
+                    );
+                  }
+                  if (!insightRequestActive) return null;
                   stream.emitInsight({ status: "generating" });
                   try {
                     const snapshot = await insightApplication.generateForAnalysis(

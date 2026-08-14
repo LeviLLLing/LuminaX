@@ -19,6 +19,7 @@ export interface InsightActionPanelProps {
   isLoading: boolean;
   error: string | null;
   generationStatus: "idle" | "generating" | "failed";
+  pendingActionIds: string[];
   activeScope: ActiveInsightScope;
   suggestions: string[];
   onAskQuestion(question: string): void;
@@ -31,6 +32,7 @@ export function InsightActionPanel({
   isLoading,
   error,
   generationStatus,
+  pendingActionIds,
   activeScope,
   suggestions,
   onAskQuestion,
@@ -152,7 +154,11 @@ export function InsightActionPanel({
           </div>
         </section>
       )}
-      <InsightActionChecklist actions={insight.actions} onToggleAction={onToggleAction} />
+      <InsightActionChecklist
+        actions={insight.actions}
+        pendingActionIds={pendingActionIds}
+        onToggleAction={onToggleAction}
+      />
     </div>
   );
 }

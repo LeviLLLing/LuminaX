@@ -76,8 +76,8 @@ export function materializeInsightSnapshot(input: MaterializeInsightSnapshotInpu
     links.push({ findingId: id, evidenceIds: finding.evidenceIds });
     return {
       id,
-      title: finding.title,
-      summary: finding.summary,
+      title: source.label,
+      summary: `${source.label}为${source.displayValue}，由固定 SQL 结果与关联证据支持。`,
       severity: finding.severity,
       confidence: finding.confidence,
       subjectIds: [...source.subjectIds],
@@ -99,7 +99,16 @@ export function materializeInsightSnapshot(input: MaterializeInsightSnapshotInpu
   });
   for (const finding of findings) finding.evidenceIds = finding.evidenceIds.map((id) => evidenceIdMap.get(id)!);
 
-  const verificationItems = draft.verificationItems.map((item) => ({ id: uuid(), ...item }));
+  const verificationItems = draft.verificationItems.map((item) => {
+    const source = sources.get(item.sourceId);
+    if (!source) throw new InsightValidationError("UNKNOWN_VERIFICATION_SOURCE_ID");
+    return {
+      id: uuid(),
+      observedFact: `${source.label}：${source.displayValue}`,
+      hypothesis: item.hypothesis,
+      requiredCheck: item.requiredCheck,
+    };
+  });
   const actions = draft.actions.map((action) => {
     const verificationMetricLabel = catalog.verificationMetricLabels[action.verificationMetricCode];
     if (!verificationMetricLabel) throw new InsightValidationError("UNKNOWN_VERIFICATION_METRIC");
@@ -112,7 +121,7 @@ export function materializeInsightSnapshot(input: MaterializeInsightSnapshotInpu
     sourceQuestion: input.question,
     sourceIntent: input.intent,
     scope: structuredClone(input.scope),
-    headline: draft.headline,
+    headline: buildDeterministicHeadline(findings),
     findings,
     evidence,
     verificationItems,
@@ -124,6 +133,12 @@ export function materializeInsightSnapshot(input: MaterializeInsightSnapshotInpu
   };
 }
 
+function buildDeterministicHeadline(
+  findings: InsightSnapshot["findings"]
+): string {
+  return `${findings[0].title}等关键经营信号需要关注`;
+}
+
 function assertUniqueCatalogIds(ids: string[], code: string): void {
   if (new Set(ids).size !== ids.length) {
     throw new InsightValidationError(code);
@@ -132,9 +147,7 @@ function assertUniqueCatalogIds(ids: string[], code: string): void {
 
 function validateDraftProse(draft: InsightDraft): void {
   const prose = [
-    draft.headline,
-    ...draft.findings.flatMap((finding) => [finding.title, finding.summary]),
-    ...draft.verificationItems.flatMap((item) => [item.observedFact, item.hypothesis, item.requiredCheck]),
+    ...draft.verificationItems.flatMap((item) => [item.hypothesis, item.requiredCheck]),
     ...draft.actions.map((action) => action.title),
   ];
   if (prose.some((value) => typeof value !== "string" || value.trim().length === 0 || containsNumericClaim(value))) {

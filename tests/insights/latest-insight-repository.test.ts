@@ -13,6 +13,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   FileLatestInsightRepository,
+  InsightConditionalWriteError,
   InsightConflictError,
   type LatestInsightFileSystem,
   InsightNotFoundError,
@@ -50,6 +51,38 @@ test("repository replaces and restores one latest snapshot per user", async () =
     (await new FileLatestInsightRepository(file).findByUserId("u2"))?.id,
     "other"
   );
+});
+
+test("conditional replacement restores the previous snapshot when superseded during commit", async () => {
+  const file = join(await createTemporaryDirectory(), "latest.json");
+  const seedRepository = new FileLatestInsightRepository(file);
+  await seedRepository.replaceForUser(
+    createSnapshot({ id: "old", sourceFingerprint: "old" })
+  );
+
+  let current = true;
+  let renameCount = 0;
+  const repository = new FileLatestInsightRepository(
+    file,
+    createFileSystem({
+      async rename(oldPath, newPath) {
+        await rename(oldPath, newPath);
+        renameCount += 1;
+        if (renameCount === 1) current = false;
+      },
+    })
+  );
+
+  await assert.rejects(
+    repository.replaceForUser(
+      createSnapshot({ id: "new", sourceFingerprint: "new" }),
+      () => current
+    ),
+    InsightConditionalWriteError
+  );
+
+  assert.equal((await repository.findByUserId("u1"))?.id, "old");
+  assert.equal(renameCount, 2);
 });
 
 test("repository serializes concurrent replacements without losing users", async () => {

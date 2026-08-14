@@ -31,11 +31,11 @@
 - `InsightComposer` is a projection component, not a fourth runtime Agent. It uses `DEEPSEEK_INSIGHT_MODEL || DEEPSEEK_MODEL || deepseek-v4-flash`, has no Agent memory, does not access the database, and never calculates metrics.
 
 ### Insight projection
-- `InsightApplication` consumes only authorized structured analysis, validates model-authored prose against deterministic source and evidence catalogs, and atomically replaces the authenticated user's latest snapshot.
+- `InsightApplication` consumes only authorized structured analysis. `InsightComposer` may select catalog IDs and draft hypotheses or actions, while the validator derives every persisted headline, finding title, finding summary, and observed fact from the deterministic SQL source catalog.
 - `LatestInsightRepository` defaults to `.luminax/latest-insights.json`. Its interface is replaceable by a MySQL implementation without changing the application or HTTP routes.
 - `GET /api/insights/latest` restores the current user's latest snapshot. `PATCH /api/insights/latest/actions/:actionId` updates one action using the current insight ID for optimistic concurrency.
 - Both routes reauthorize the exact stored table, column, and store requirements before returning or mutating a snapshot. Authorization failure hides the full snapshot rather than returning a partial result.
-- Insight generation adds `generating`, `updated`, and `failed` lifecycle events to SSE. Failures preserve the previous insight and fall back to the full chat answer; stale requests cannot overwrite newer generations.
+- Insight generation adds `generating`, `updated`, and `failed` lifecycle events to SSE. A triggerable newer analysis claims its request token before SQL execution; conditional repository writes prevent stale requests from overwriting newer generations. Failures preserve the previous insight and fall back to the full chat answer.
 
 ### Metrics and SQL
 - Fixed metric execution uses `SqlMetricQueryExecutor.execute(intent, scope)` from `src/modules/metrics/sql-metric-query-executor.ts`, implemented by `MySqlSqlMetricQueryExecutor` in `src/modules/metrics/sql/mysql-sql-metric-query-executor.ts`.

@@ -24,6 +24,7 @@ interface InsightCanvasProps {
   insightLoading: boolean;
   insightError: string | null;
   insightGenerationStatus: "idle" | "generating" | "failed";
+  pendingInsightActionIds: string[];
   activeInsightScope: Omit<InsightScope, "comparisonLabel">;
   suggestions: string[];
   onAskQuestion(question: string): void;
@@ -49,6 +50,7 @@ export function InsightCanvas({
   insightLoading,
   insightError,
   insightGenerationStatus,
+  pendingInsightActionIds,
   activeInsightScope,
   suggestions,
   onAskQuestion,
@@ -107,6 +109,7 @@ export function InsightCanvas({
           isLoading={insightLoading}
           error={insightError}
           generationStatus={insightGenerationStatus}
+          pendingActionIds={pendingInsightActionIds}
           activeScope={activeInsightScope}
           suggestions={suggestions}
           onAskQuestion={onAskQuestion}

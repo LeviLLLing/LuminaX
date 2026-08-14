@@ -34,7 +34,10 @@ interface LatestInsightRegistryFile {
 
 export interface LatestInsightRepository {
   findByUserId(userId: string): Promise<InsightSnapshot | null>;
-  replaceForUser(snapshot: InsightSnapshot): Promise<InsightSnapshot>;
+  replaceForUser(
+    snapshot: InsightSnapshot,
+    shouldCommit?: () => boolean
+  ): Promise<InsightSnapshot>;
   updateActionState(
     userId: string,
     insightId: string,
@@ -57,6 +60,13 @@ export class InsightConflictError extends Error {
   }
 }
 
+export class InsightConditionalWriteError extends Error {
+  constructor() {
+    super("The insight was superseded before it could be committed.");
+    this.name = "InsightConditionalWriteError";
+  }
+}
+
 export class InsightRepositoryCorruptError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -75,20 +85,31 @@ export class FileLatestInsightRepository implements LatestInsightRepository {
   ) {}
 
   async findByUserId(userId: string): Promise<InsightSnapshot | null> {
+    await this.writeQueue.catch(() => undefined);
     const snapshot = (await this.readRegistry()).insights[userId];
     return snapshot ? structuredClone(snapshot) : null;
   }
 
-  async replaceForUser(snapshot: InsightSnapshot): Promise<InsightSnapshot> {
+  async replaceForUser(
+    snapshot: InsightSnapshot,
+    shouldCommit: () => boolean = () => true
+  ): Promise<InsightSnapshot> {
     return this.withWriteLock(async () => {
       const registry = await this.readRegistry();
+      if (!shouldCommit()) throw new InsightConditionalWriteError();
       const existing = registry.insights[snapshot.userId];
       if (existing?.sourceFingerprint === snapshot.sourceFingerprint) {
         return structuredClone(existing);
       }
 
+      const previousRegistry = structuredClone(registry);
       registry.insights[snapshot.userId] = structuredClone(snapshot);
+      if (!shouldCommit()) throw new InsightConditionalWriteError();
       await this.writeRegistry(registry);
+      if (!shouldCommit()) {
+        await this.writeRegistry(previousRegistry);
+        throw new InsightConditionalWriteError();
+      }
       return structuredClone(snapshot);
     });
   }

@@ -226,7 +226,7 @@ function projectingBusinessAgent(intent: "compare" | "achievement_rate" = "compa
 }
 
 function insightApplication(generate: () => Promise<InsightSnapshot>): InsightApplication {
-  return { beginRequest(userId) { return { userId, requestId: "r1", startedAt: 1 }; }, generateForAnalysis: generate, async getLatest() { return null; }, async updateAction() { throw new Error("unused"); } };
+  return { beginRequest(userId) { return { userId, requestId: "r1", startedAt: 1 }; }, activateRequest() { return true; }, generateForAnalysis: generate, async getLatest() { return null; }, async updateAction() { throw new Error("unused"); } };
 }
 
 function snapshot(): InsightSnapshot {

@@ -270,6 +270,7 @@ test("insight canvas exposes the renamed tab", () => {
       insightLoading: false,
       insightError: null,
       insightGenerationStatus: "idle",
+      pendingInsightActionIds: [],
       activeInsightScope: {
         storeIds: ["S001"],
         startDate: "2026-08-01",
@@ -345,6 +346,13 @@ test("action save failure keeps the snapshot visible with a light warning", () =
   assert.match(html, /行动状态保存失败/);
   assert.match(html, new RegExp(insightDto.headline));
   assert.doesNotMatch(html, /Insight action update failed/);
+});
+
+test("an action checkbox is disabled while its save is pending", () => {
+  const html = renderInsightPanel({ pendingActionIds: ["action-1"] });
+
+  assert.match(html, /aria-busy="true"/);
+  assert.match(html, /disabled=""/);
 });
 
 test("failed first generation renders a retryable empty state", () => {
@@ -459,6 +467,7 @@ function renderInsightPanel(
       isLoading: false,
       error: null,
       generationStatus: "idle",
+      pendingActionIds: [],
       activeScope: {
         storeIds: ["S001"],
         startDate: "2026-08-01",

@@ -7,24 +7,32 @@ import type { InsightAction } from "@/modules/insights/insight-types";
 
 interface InsightActionChecklistProps {
   actions: InsightAction[];
+  pendingActionIds: string[];
   onToggleAction(actionId: string, completed: boolean): Promise<void>;
 }
 
 export function InsightActionChecklist({
   actions,
+  pendingActionIds,
   onToggleAction,
 }: InsightActionChecklistProps) {
   return (
     <section className="bg-white px-4 py-5 sm:px-5">
       <h3 className="text-sm font-semibold text-[#17181a]">建议行动</h3>
       <div className="mt-3 divide-y divide-[#e9eaec] border-y border-[#e9eaec]">
-        {actions.map((action) => (
-          <label
+        {actions.map((action) => {
+          const pending = pendingActionIds.includes(action.id);
+          return <label
             key={action.id}
-            className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] gap-3 py-4"
+            className={cn(
+              "grid grid-cols-[auto_minmax(0,1fr)] gap-3 py-4",
+              pending ? "cursor-wait" : "cursor-pointer"
+            )}
           >
             <Checkbox
               checked={action.completed}
+              disabled={pending}
+              aria-busy={pending}
               aria-label={`${action.completed ? "取消完成" : "标记完成"}：${action.title}`}
               onCheckedChange={(checked) => {
                 void onToggleAction(action.id, checked === true);
@@ -48,8 +56,8 @@ export function InsightActionChecklist({
                 <span>验证指标：{action.verificationMetricLabel}</span>
               </span>
             </span>
-          </label>
-        ))}
+          </label>;
+        })}
       </div>
     </section>
   );

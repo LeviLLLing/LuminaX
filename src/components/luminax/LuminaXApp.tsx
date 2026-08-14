@@ -78,6 +78,7 @@ export function LuminaXApp({ user }: { user: AuthenticatedUser }) {
           insightLoading={latestInsight.isLoading}
           insightError={latestInsight.error}
           insightGenerationStatus={latestInsight.generationStatus}
+          pendingInsightActionIds={latestInsight.pendingActionIds}
           activeInsightScope={controller.activeInsightScope}
           suggestions={suggestions}
           onAskQuestion={chat.sendMessage}

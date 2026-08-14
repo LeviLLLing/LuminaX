@@ -17,6 +17,7 @@ export interface LatestInsightState {
   isLoading: boolean;
   error: string | null;
   generationStatus: "idle" | "generating" | "failed";
+  pendingActionIds: string[];
 }
 
 export interface UseLatestInsightResult extends LatestInsightState {
@@ -47,6 +48,7 @@ export function createLatestInsightStateController(
     isLoading: true,
     error: null,
     generationStatus: "idle",
+    pendingActionIds: [],
   };
   let reloadSequence = 0;
   let snapshotRevision = 0;
@@ -121,6 +123,7 @@ export function createLatestInsightStateController(
     actionId: string,
     completed: boolean
   ): Promise<void> => {
+    if (state.pendingActionIds.includes(actionId)) return;
     const previous = state.insight;
     if (!previous) return;
     const previousAction = previous.actions.find((action) => action.id === actionId);
@@ -131,6 +134,7 @@ export function createLatestInsightStateController(
     actionSequences.set(actionId, sequence);
     setState({
       error: null,
+      pendingActionIds: [...state.pendingActionIds, actionId],
       insight: {
         ...previous,
         actions: previous.actions.map((action) =>
@@ -192,6 +196,14 @@ export function createLatestInsightStateController(
         } catch {
           // Rollback remains visible when refreshing the latest snapshot fails.
         }
+      }
+    } finally {
+      if (state.pendingActionIds.includes(actionId)) {
+        setState({
+          pendingActionIds: state.pendingActionIds.filter(
+            (pendingActionId) => pendingActionId !== actionId
+          ),
+        });
       }
     }
 

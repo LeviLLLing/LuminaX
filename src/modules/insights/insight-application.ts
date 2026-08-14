@@ -19,6 +19,7 @@ import {
   type InsightSnapshotDto,
 } from "./insight-types";
 import type { LatestInsightRepository } from "./latest-insight-repository";
+import { InsightConditionalWriteError } from "./latest-insight-repository";
 import { materializeInsightSnapshot } from "./insight-validator";
 
 export type InsightRequestToken = InsightGenerationToken;
@@ -29,6 +30,7 @@ export interface InsightApplication {
     requestId?: string,
     startedAt?: number
   ): InsightRequestToken;
+  activateRequest(token: InsightRequestToken): boolean;
   generateForAnalysis(
     token: InsightRequestToken,
     analysis: BusinessAnalysisContext
@@ -91,8 +93,14 @@ export function createInsightApplication({
       return { userId, requestId, startedAt };
     },
 
+    activateRequest(token) {
+      return guard.claim(token);
+    },
+
     async generateForAnalysis(token, analysis) {
-      if (!guard.claim(token)) throw new StaleInsightGenerationError();
+      if (!guard.isCurrent(token) && !guard.claim(token)) {
+        throw new StaleInsightGenerationError();
+      }
       const scope = {
         storeIds: [...analysis.storeIds],
         startDate: analysis.startDate,
@@ -120,7 +128,17 @@ export function createInsightApplication({
         accessRequirements: analysis.accessRequirements,
       });
       if (!guard.isCurrent(token)) throw new StaleInsightGenerationError();
-      return repository.replaceForUser(snapshot);
+      try {
+        return await repository.replaceForUser(
+          snapshot,
+          () => guard.isCurrent(token)
+        );
+      } catch (error) {
+        if (error instanceof InsightConditionalWriteError) {
+          throw new StaleInsightGenerationError();
+        }
+        throw error;
+      }
     },
 
     async getLatest(userId) {

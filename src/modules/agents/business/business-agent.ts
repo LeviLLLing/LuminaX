@@ -47,6 +47,7 @@ export interface BusinessAgentRequest extends GovernanceHandoff {
   startDate?: string;
   endDate?: string;
   stream?: ChatStreamCallbacks;
+  onAnalysisPlanned?: (intent: AnalysisIntent) => void | Promise<void>;
   onAnalysisReady?: (
     analysis: BusinessAnalysisContext
   ) => Promise<BusinessResponseOverride | null>;
@@ -208,6 +209,8 @@ export function createBusinessAgent({
           endDate
         );
       }
+
+      await request.onAnalysisPlanned?.(intentResult.intent);
 
       let allStoreIds: string[];
       let analysisData: Record<string, unknown> | null;

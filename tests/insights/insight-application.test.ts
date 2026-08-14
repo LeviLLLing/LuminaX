@@ -121,6 +121,45 @@ test("an older generation that finishes composing last cannot write", async () =
   assert.equal((await repository.findByUserId("u1"))?.sourceQuestion, "new");
 });
 
+test("activating a newer planned insight prevents an older generation from saving", async () => {
+  const repository = createRepository([]);
+  let releaseOld: (() => void) | undefined;
+  let oldComposeStarted: (() => void) | undefined;
+  const oldStarted = new Promise<void>((resolve) => {
+    oldComposeStarted = resolve;
+  });
+  const oldRelease = new Promise<void>((resolve) => {
+    releaseOld = resolve;
+  });
+  const baseComposer = createComposer([]);
+  const application = createInsightApplication({
+    repository,
+    guard: new InsightGenerationGuard(),
+    composer: {
+      async compose(input) {
+        oldComposeStarted?.();
+        await oldRelease;
+        return baseComposer.compose(input);
+      },
+    },
+    buildCatalog: () => catalog,
+    accessControl: createAllowingAccessControl([]),
+    listStoreIds: async () => ["S001", "S002"],
+  });
+
+  const oldGeneration = application.generateForAnalysis(
+    application.beginRequest("u1", "old", 10),
+    { ...analysis, question: "old" }
+  );
+  await oldStarted;
+  const newer = application.beginRequest("u1", "new", 20);
+  assert.equal(await application.activateRequest(newer), true);
+  releaseOld?.();
+
+  await assert.rejects(oldGeneration, StaleInsightGenerationError);
+  assert.equal(await repository.findByUserId("u1"), null);
+});
+
 test("beginRequest does not claim the generation guard", async () => {
   const guard = new InsightGenerationGuard();
   const application = createInsightApplication({
@@ -291,8 +330,7 @@ function createComposer(order: string[]): InsightComposer {
     async compose() {
       order.push("compose");
       return {
-        headline: "门店差异值得跟进",
-        findings: [1, 2, 3].map((value) => ({ sourceId: `source-${value}`, title: `发现甲${value === 1 ? "" : value === 2 ? "乙" : "丙"}`, summary: "需要持续观察", severity: "medium" as const, confidence: "high" as const, evidenceIds: [`evidence-${value}`] })),
+        findings: [1, 2, 3].map((value) => ({ sourceId: `source-${value}`, severity: "medium" as const, confidence: "high" as const, evidenceIds: [`evidence-${value}`] })),
         verificationItems: [],
         actions: [
           { priority: "P0", title: "核查门店目标执行", ownerRole: "区域经理", verificationMetricCode: "sales" },

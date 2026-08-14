@@ -277,8 +277,7 @@ test("evidence values are copied from SQL data and never from the draft", () => 
 const compareCatalog = buildInsightSourceCatalog({ intent: "compare", analysisData: fixtures.compare });
 const sourceIds = compareCatalog.findingSources.slice(0, 3).map((item) => item.id);
 const validDraft: InsightDraft = {
-  headline: "门店表现分化需跟进",
-  findings: sourceIds.map((sourceId, index) => ({ sourceId, title: ["门店表现承压", "目标差距明显", "结构贡献分化"][index], summary: ["需要关注目标完成情况", "建议核查执行差异", "贡献结构值得持续观察"][index], severity: index === 2 ? "medium" : "high", confidence: "high", evidenceIds: [compareCatalog.findingSources[index].evidenceCandidateIds[0]] })),
+  findings: sourceIds.map((sourceId, index) => ({ sourceId, severity: index === 2 ? "medium" : "high", confidence: "high", evidenceIds: [compareCatalog.findingSources[index].evidenceCandidateIds[0]] })),
   verificationItems: [],
   actions: [
     { priority: "P0", title: "复盘门店执行", ownerRole: "运营", verificationMetricCode: "sales" },
@@ -328,10 +327,41 @@ test("materialization copies source facts, links evidence, and initializes actio
 });
 
 test("model-authored numeric claims and unknown IDs reject the snapshot", () => {
-  assert.throws(() => materializeInsightSnapshot({ ...materializeInput, draft: { ...validDraft, headline: "销售下降20%" } }), InsightValidationError);
-  assert.throws(() => materializeInsightSnapshot({ ...materializeInput, draft: { ...validDraft, headline: "销售下降二成" } }), InsightValidationError);
+  assert.throws(() => materializeInsightSnapshot({ ...materializeInput, draft: { ...validDraft, actions: [{ ...validDraft.actions[0], title: "销售下降20%" }, validDraft.actions[1]] } }), InsightValidationError);
+  assert.throws(() => materializeInsightSnapshot({ ...materializeInput, draft: { ...validDraft, actions: [{ ...validDraft.actions[0], title: "销售下降二成" }, validDraft.actions[1]] } }), InsightValidationError);
   assert.throws(() => materializeInsightSnapshot({ ...materializeInput, draft: { ...validDraft, findings: [{ ...validDraft.findings[0], sourceId: "unknown" }, ...validDraft.findings.slice(1)] } }), InsightValidationError);
   assert.throws(() => materializeInsightSnapshot({ ...materializeInput, draft: { ...validDraft, findings: [{ ...validDraft.findings[0], evidenceIds: ["unknown"] }, ...validDraft.findings.slice(1)] } }), InsightValidationError);
+});
+
+test("model-authored factual fields are ignored and never persisted", async () => {
+  const maliciousPhrase = "Understaffing caused sales pressure";
+  const modelDraft = {
+    ...validDraft,
+    headline: maliciousPhrase,
+    findings: validDraft.findings.map((finding) => ({
+      ...finding,
+      title: maliciousPhrase,
+      summary: maliciousPhrase,
+    })),
+    verificationItems: [{
+      sourceId: sourceIds[0],
+      observedFact: maliciousPhrase,
+      hypothesis: "Staffing may need review",
+      requiredCheck: "Review staffing records",
+    }],
+  };
+  const composer = createInsightComposer({ model: new FakeAgentModel("deepseek", () => JSON.stringify(modelDraft)) });
+  const draft = await composer.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog });
+
+  const snapshot = materializeInsightSnapshot({ ...materializeInput, draft });
+  const persistedFacts = JSON.stringify({
+    headline: snapshot.headline,
+    findings: snapshot.findings.map(({ title, summary }) => ({ title, summary })),
+    observedFacts: snapshot.verificationItems.map((item) => item.observedFact),
+  });
+  assert.doesNotMatch(persistedFacts, new RegExp(maliciousPhrase, "i"));
+  assert.equal(snapshot.findings[0].title, compareCatalog.findingSources[0].label);
+  assert.match(snapshot.verificationItems[0].observedFact, new RegExp(compareCatalog.findingSources[0].label));
 });
 
 test("empty evidence, unsupported numeric prose, and bad reference cardinality reject", () => {
@@ -377,16 +407,25 @@ test("materialization rejects duplicate catalog IDs and unsupported evidence fac
   assert.throws(() => materializeInsightSnapshot({ ...materializeInput, catalog: maliciousCatalog, draft: maliciousDraft }), (error: unknown) => error instanceof InsightValidationError && error.code === "UNSUPPORTED_EVIDENCE_FACT");
 });
 
-test("verification references must resolve and observed facts still need evidence", () => {
-  const draft: InsightDraft = { ...validDraft, verificationItems: [{ observedFact: "现场执行存疑", hypothesis: "可能存在执行偏差", requiredCheck: "核查排班记录" }] };
+test("verification references must resolve and observed facts come from the selected source", () => {
+  const draft: InsightDraft = {
+    ...validDraft,
+    verificationItems: [{
+      sourceId: sourceIds[2],
+      hypothesis: "可能存在执行偏差",
+      requiredCheck: "核查排班记录",
+    }],
+  };
   const snapshot = materializeInsightSnapshot({ ...materializeInput, draft });
   assert.equal(snapshot.verificationItems.length, 1);
+  assert.match(snapshot.verificationItems[0].observedFact, new RegExp(compareCatalog.findingSources[2].label));
+  assert.throws(() => materializeInsightSnapshot({ ...materializeInput, draft: { ...draft, verificationItems: [{ ...draft.verificationItems[0], sourceId: "unknown" }] } }), (error: unknown) => error instanceof InsightValidationError && error.code === "UNKNOWN_VERIFICATION_SOURCE_ID");
   assert.throws(() => materializeInsightSnapshot({ ...materializeInput, draft: { ...draft, actions: [{ ...draft.actions[0], verificationMetricCode: "unknown" }, draft.actions[1]] } }), InsightValidationError);
 });
 
 test("fingerprint and formatting are deterministic and exclude question and prose", () => {
   const first = materializeInsightSnapshot(materializeInput);
-  const reordered = materializeInsightSnapshot({ ...materializeInput, question: "另一个问题", scope: { ...scope, storeIds: [...scope.storeIds].reverse() }, draft: { ...validDraft, headline: "经营表现需要持续关注" }, randomUUID: () => "other-id" });
+  const reordered = materializeInsightSnapshot({ ...materializeInput, question: "另一个问题", scope: { ...scope, storeIds: [...scope.storeIds].reverse() }, draft: { ...validDraft, actions: [{ ...validDraft.actions[0], title: "复盘运营执行" }, validDraft.actions[1]] }, randomUUID: () => "other-id" });
   assert.equal(first.sourceFingerprint, reordered.sourceFingerprint);
   assert.match(first.sourceFingerprint, /^[a-f0-9]{64}$/);
   assert.ok(compareCatalog.findingSources.some((item) => item.unit === "currency" && item.displayValue === "¥95,000"));

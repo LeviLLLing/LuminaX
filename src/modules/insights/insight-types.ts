@@ -103,17 +103,14 @@ export type InsightStreamEvent =
   | { status: "failed" };
 
 export interface InsightDraft {
-  headline: string;
   findings: Array<{
     sourceId: string;
-    title: string;
-    summary: string;
     severity: InsightSeverity;
     confidence: InsightConfidence;
     evidenceIds: string[];
   }>;
   verificationItems: Array<{
-    observedFact: string;
+    sourceId: string;
     hypothesis: string;
     requiredCheck: string;
   }>;
