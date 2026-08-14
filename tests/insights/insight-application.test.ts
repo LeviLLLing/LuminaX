@@ -343,8 +343,15 @@ function createComposer(order: string[]): InsightComposer {
 
 function createRepository(order: string[]): LatestInsightRepository {
   let current: InsightSnapshot | null = null;
+  const generations = new Map<string, { userId: string; requestId: string; startedAt: number }>();
   return {
     async findByUserId() { return current && structuredClone(current); },
+    async claimGeneration(token) {
+      const active = generations.get(token.userId);
+      if (active && (token.startedAt < active.startedAt || (token.startedAt === active.startedAt && token.requestId.localeCompare(active.requestId) < 0))) return false;
+      generations.set(token.userId, structuredClone(token));
+      return true;
+    },
     async replaceForUser(snapshot) { order.push("save"); current = structuredClone(snapshot); return structuredClone(snapshot); },
     async updateActionState() { if (!current) throw new Error("missing"); return structuredClone(current); },
   };

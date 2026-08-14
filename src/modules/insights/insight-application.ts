@@ -30,7 +30,7 @@ export interface InsightApplication {
     requestId?: string,
     startedAt?: number
   ): InsightRequestToken;
-  activateRequest(token: InsightRequestToken): boolean;
+  activateRequest(token: InsightRequestToken): Promise<boolean>;
   generateForAnalysis(
     token: InsightRequestToken,
     analysis: BusinessAnalysisContext
@@ -88,17 +88,20 @@ export function createInsightApplication({
     }
   }
 
+  async function activateRequest(token: InsightRequestToken): Promise<boolean> {
+    if (!guard.claim(token)) return false;
+    return repository.claimGeneration(token);
+  }
+
   return {
     beginRequest(userId, requestId = randomUUID(), startedAt = Date.now()) {
       return { userId, requestId, startedAt };
     },
 
-    activateRequest(token) {
-      return guard.claim(token);
-    },
+    activateRequest,
 
     async generateForAnalysis(token, analysis) {
-      if (!guard.isCurrent(token) && !guard.claim(token)) {
+      if (!guard.isCurrent(token) && !(await activateRequest(token))) {
         throw new StaleInsightGenerationError();
       }
       const scope = {
@@ -129,10 +132,7 @@ export function createInsightApplication({
       });
       if (!guard.isCurrent(token)) throw new StaleInsightGenerationError();
       try {
-        return await repository.replaceForUser(
-          snapshot,
-          () => guard.isCurrent(token)
-        );
+        return await repository.replaceForUser(snapshot, token);
       } catch (error) {
         if (error instanceof InsightConditionalWriteError) {
           throw new StaleInsightGenerationError();

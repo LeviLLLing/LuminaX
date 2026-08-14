@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import type { InsightGenerationToken } from "./insight-generation-guard";
 import type { InsightAction, InsightSnapshot } from "./insight-types";
 
 export interface LatestInsightFileSystem {
@@ -30,13 +33,20 @@ const insightOwnerRoles = [
 interface LatestInsightRegistryFile {
   version: 1;
   insights: Record<string, InsightSnapshot>;
+  generations: Record<string, InsightGenerationToken>;
 }
+
+const sharedWriteQueues = new Map<string, Promise<unknown>>();
+const LOCK_RETRY_MS = 10;
+const LOCK_TIMEOUT_MS = 5_000;
+const STALE_LOCK_MS = 30_000;
 
 export interface LatestInsightRepository {
   findByUserId(userId: string): Promise<InsightSnapshot | null>;
+  claimGeneration(token: InsightGenerationToken): Promise<boolean>;
   replaceForUser(
     snapshot: InsightSnapshot,
-    shouldCommit?: () => boolean
+    token?: InsightGenerationToken
   ): Promise<InsightSnapshot>;
   updateActionState(
     userId: string,
@@ -75,8 +85,6 @@ export class InsightRepositoryCorruptError extends Error {
 }
 
 export class FileLatestInsightRepository implements LatestInsightRepository {
-  private writeQueue: Promise<unknown> = Promise.resolve();
-
   constructor(
     private readonly filePath =
       process.env.LUMINAX_LATEST_INSIGHTS_PATH ||
@@ -85,31 +93,45 @@ export class FileLatestInsightRepository implements LatestInsightRepository {
   ) {}
 
   async findByUserId(userId: string): Promise<InsightSnapshot | null> {
-    await this.writeQueue.catch(() => undefined);
+    await (sharedWriteQueues.get(resolve(this.filePath)) || Promise.resolve()).catch(
+      () => undefined
+    );
     const snapshot = (await this.readRegistry()).insights[userId];
     return snapshot ? structuredClone(snapshot) : null;
   }
 
+  async claimGeneration(token: InsightGenerationToken): Promise<boolean> {
+    return this.withWriteLock(async () => {
+      const registry = await this.readRegistry();
+      const current = registry.generations[token.userId];
+      if (current && compareGenerationTokens(token, current) < 0) return false;
+      if (current && sameGenerationToken(token, current)) return true;
+      registry.generations[token.userId] = structuredClone(token);
+      await this.writeRegistry(registry);
+      return true;
+    });
+  }
+
   async replaceForUser(
     snapshot: InsightSnapshot,
-    shouldCommit: () => boolean = () => true
+    token?: InsightGenerationToken
   ): Promise<InsightSnapshot> {
     return this.withWriteLock(async () => {
       const registry = await this.readRegistry();
-      if (!shouldCommit()) throw new InsightConditionalWriteError();
+      if (
+        token &&
+        (token.userId !== snapshot.userId ||
+          !sameGenerationToken(token, registry.generations[token.userId]))
+      ) {
+        throw new InsightConditionalWriteError();
+      }
       const existing = registry.insights[snapshot.userId];
       if (existing?.sourceFingerprint === snapshot.sourceFingerprint) {
         return structuredClone(existing);
       }
 
-      const previousRegistry = structuredClone(registry);
       registry.insights[snapshot.userId] = structuredClone(snapshot);
-      if (!shouldCommit()) throw new InsightConditionalWriteError();
       await this.writeRegistry(registry);
-      if (!shouldCommit()) {
-        await this.writeRegistry(previousRegistry);
-        throw new InsightConditionalWriteError();
-      }
       return structuredClone(snapshot);
     });
   }
@@ -153,7 +175,7 @@ export class FileLatestInsightRepository implements LatestInsightRepository {
       content = await this.fileSystem.readFile(this.filePath, "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { version: 1, insights: {} };
+        return { version: 1, insights: {}, generations: {} };
       }
       throw error;
     }
@@ -173,7 +195,10 @@ export class FileLatestInsightRepository implements LatestInsightRepository {
         "Latest insight repository has an invalid format."
       );
     }
-    return parsed;
+    return {
+      ...parsed,
+      generations: parsed.generations || {},
+    };
   }
 
   private async writeRegistry(registry: LatestInsightRegistryFile): Promise<void> {
@@ -206,25 +231,154 @@ export class FileLatestInsightRepository implements LatestInsightRepository {
   }
 
   private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.writeQueue.then(operation, operation);
-    this.writeQueue = result.then(
+    const key = resolve(this.filePath);
+    const previous = sharedWriteQueues.get(key) || Promise.resolve();
+    const result = previous.then(
+      () => withFileLock(key, operation),
+      () => withFileLock(key, operation)
+    );
+    const settled = result.then(
       () => undefined,
       () => undefined
     );
+    sharedWriteQueues.set(key, settled);
+    void settled.then(() => {
+      if (sharedWriteQueues.get(key) === settled) sharedWriteQueues.delete(key);
+    });
     return result;
+  }
+}
+
+async function withFileLock<T>(
+  filePath: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  await mkdir(dirname(filePath), { recursive: true });
+  const lockPath = `${filePath}.lock`;
+  const owner = `${process.pid}:${randomUUID()}`;
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let handle: FileHandle | undefined;
+  while (!handle) {
+    try {
+      const candidate = await open(lockPath, "wx");
+      try {
+        await candidate.writeFile(owner, "utf8");
+        handle = candidate;
+      } catch (error) {
+        await candidate.close().catch(() => undefined);
+        await rm(lockPath, { force: true }).catch(() => undefined);
+        throw error;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        const lockStats = await stat(lockPath);
+        if (Date.now() - lockStats.mtimeMs > STALE_LOCK_MS) {
+          await rm(lockPath, { force: true });
+          continue;
+        }
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== "ENOENT") throw statError;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error("Timed out waiting for the latest insight repository lock.");
+      }
+      await delay(LOCK_RETRY_MS);
+    }
+  }
+
+  let operationFailed = false;
+  let operationError: unknown;
+  let result: T | undefined;
+  try {
+    result = await operation();
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+  }
+  const cleanupError = await releaseFileLock(handle, lockPath, owner);
+  if (operationFailed) {
+    attachCleanupError(operationError, cleanupError);
+    throw operationError;
+  }
+  if (cleanupError) throw cleanupError;
+  return result as T;
+}
+
+async function releaseFileLock(
+  handle: FileHandle,
+  lockPath: string,
+  owner: string
+): Promise<unknown | null> {
+  try {
+    await handle.close();
+    const currentOwner = await readFile(lockPath, "utf8").catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    if (currentOwner === owner) await rm(lockPath, { force: true });
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+function attachCleanupError(error: unknown, cleanupError: unknown | null): void {
+  if (!(error instanceof Error) || !cleanupError) return;
+  try {
+    Object.defineProperty(error, "lockCleanupError", {
+      configurable: true,
+      value: cleanupError,
+    });
+  } catch {
+    // Lock cleanup metadata must never replace the original operation failure.
   }
 }
 
 function isLatestInsightRegistryFile(
   value: unknown
 ): value is LatestInsightRegistryFile {
-  if (!isRecord(value) || value.version !== 1 || !isRecord(value.insights)) {
+  if (
+    !isRecord(value) ||
+    value.version !== 1 ||
+    !isRecord(value.insights) ||
+    (value.generations !== undefined && !isRecord(value.generations))
+  ) {
     return false;
   }
   return Object.entries(value.insights).every(
     ([userId, snapshot]) =>
       isInsightSnapshot(snapshot) && snapshot.userId === userId
+  ) && Object.entries(value.generations || {}).every(
+    ([userId, token]) => isGenerationToken(token) && token.userId === userId
   );
+}
+
+function isGenerationToken(value: unknown): value is InsightGenerationToken {
+  return isRecord(value) &&
+    isString(value.userId) && value.userId.trim().length > 0 &&
+    isString(value.requestId) && value.requestId.trim().length > 0 &&
+    typeof value.startedAt === "number" &&
+    Number.isFinite(value.startedAt);
+}
+
+function sameGenerationToken(
+  left: InsightGenerationToken,
+  right: InsightGenerationToken | undefined
+): boolean {
+  return Boolean(
+    right &&
+      left.userId === right.userId &&
+      left.requestId === right.requestId &&
+      left.startedAt === right.startedAt
+  );
+}
+
+function compareGenerationTokens(
+  left: InsightGenerationToken,
+  right: InsightGenerationToken
+): number {
+  return left.startedAt - right.startedAt || left.requestId.localeCompare(right.requestId);
 }
 
 function isInsightSnapshot(value: unknown): value is InsightSnapshot {

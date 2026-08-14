@@ -35,14 +35,14 @@
 - `insights`: `InsightApplication` composes and validates a projection of an authorized SQL result. `InsightComposer` uses `DEEPSEEK_INSIGHT_MODEL || DEEPSEEK_MODEL || deepseek-v4-flash` only to select controlled fact IDs and draft hypotheses or actions; it has no memory, database access, metric-calculation, or persisted-fact-authoring responsibility.
 
 ## Insight Projection Flow
-1. The Business Agent invokes `onAnalysisPlanned` after intent normalization and before SQL execution. Triggerable analyses claim the user's generation token at this point, so older work cannot commit while a newer request is calculating.
+1. The Business Agent invokes `onAnalysisPlanned` after intent normalization and before SQL execution. Triggerable analyses persist the user's generation token at this point, so older work cannot commit while a newer request is calculating.
 2. The Business Agent invokes `onAnalysisReady` with the authorized scope, fixed-SQL result and any single attribution explanation.
 3. `InsightSourceCatalog` and `EvidenceBuilder` build deterministic, traceable sources and evidence from the structured result.
 4. `InsightComposer` selects allowed source and evidence IDs, prioritizes them, and drafts only hypotheses, checks and actions. It does not author formal facts.
 5. `InsightValidator` verifies schema, references, quantities, units and access requirements, then generates the headline, finding copy and observed facts from the selected SQL-backed catalog entries.
-6. `LatestInsightRepository` conditionally and atomically replaces one latest snapshot per user. It defaults to `.luminax/latest-insights.json` and can be replaced by a MySQL implementation through the same repository contract.
+6. `LatestInsightRepository` commits only when the supplied request token exactly matches the persisted per-user generation token. The default `.luminax/latest-insights.json` implementation uses an atomic rename plus a cross-process lock; a MySQL implementation can provide the same contract with compare-and-swap.
 7. `GET /api/insights/latest` returns the reauthorized public DTO. `PATCH /api/insights/latest/actions/:actionId` reauthorizes the same exact table, column and store requirements and uses `insightId` for optimistic concurrency.
-8. A successful save emits `insight: updated` and a short chat receipt. A failure emits `insight: failed`, keeps the previous snapshot, and returns the complete chat answer. The client ignores a second toggle for the same action while its save is pending.
+8. A successful save emits `insight: updated` and a short chat receipt. A normal projection failure emits `insight: failed`, keeps the previous snapshot, and returns the complete chat answer; superseded work exits silently. The client ignores a second toggle for the same action while its save is pending.
 
 The internal workbench view ID remains `analysis`, while its user-facing label and content are “洞察与行动”. Overview continues to render operational KPIs and charts; Report continues to render its independently generated weekly report.
 

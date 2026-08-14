@@ -10,7 +10,10 @@ import {
   parseServerSentEvent,
   streamChatMessage,
 } from "../../src/modules/chat/chat-stream-client";
-import type { InsightApplication } from "../../src/modules/insights/insight-application";
+import {
+  StaleInsightGenerationError,
+  type InsightApplication,
+} from "../../src/modules/insights/insight-application";
 import type { InsightSnapshot } from "../../src/modules/insights/insight-types";
 
 test("chat application routes governance rejection and approved handoff", async () => {
@@ -190,6 +193,90 @@ test("insight failure emits failed and falls back to one full answer", async (co
   assert.deepEqual(content, ["完整业务分析正文"]);
 });
 
+test("a superseded request emits no stale insight lifecycle state", async () => {
+  const events: string[] = [];
+  let activation = 0;
+  let generations = 0;
+  const staleApplication = insightApplication(async () => {
+    generations += 1;
+    return snapshot();
+  });
+  staleApplication.activateRequest = async () => ++activation === 1;
+  const application = createChatApplication({
+    governanceAgent: allowGovernance(),
+    businessAgent: projectingBusinessAgent(),
+    insightApplication: staleApplication,
+  });
+
+  const result = await application.execute({
+    userId: "u1",
+    question: "对比门店表现",
+    stream: {
+      emitStatus() {},
+      emitReasoning() {},
+      emitContent() {},
+      emitInsight(event) { events.push(event.status); },
+    },
+  });
+
+  assert.equal(result.content, "完整业务分析正文");
+  assert.equal(generations, 0);
+  assert.deepEqual(events, []);
+});
+
+test("a request superseded during composition does not emit failed", async () => {
+  const events: string[] = [];
+  const application = createChatApplication({
+    governanceAgent: allowGovernance(),
+    businessAgent: projectingBusinessAgent(),
+    insightApplication: insightApplication(async () => {
+      throw new StaleInsightGenerationError();
+    }),
+  });
+
+  const result = await application.execute({
+    userId: "u1",
+    question: "对比门店表现",
+    stream: {
+      emitStatus() {},
+      emitReasoning() {},
+      emitContent() {},
+      emitInsight(event) { events.push(event.status); },
+    },
+  });
+
+  assert.equal(result.content, "完整业务分析正文");
+  assert.deepEqual(events, ["generating"]);
+});
+
+test("generation claim failure preserves the full business answer", async (context) => {
+  context.mock.method(console, "error", () => undefined);
+  const events: string[] = [];
+  const failedApplication = insightApplication(async () => snapshot());
+  failedApplication.activateRequest = async () => {
+    throw new Error("registry unavailable");
+  };
+  const application = createChatApplication({
+    governanceAgent: allowGovernance(),
+    businessAgent: projectingBusinessAgent(),
+    insightApplication: failedApplication,
+  });
+
+  const result = await application.execute({
+    userId: "u1",
+    question: "对比门店表现",
+    stream: {
+      emitStatus() {},
+      emitReasoning() {},
+      emitContent() {},
+      emitInsight(event) { events.push(event.status); },
+    },
+  });
+
+  assert.equal(result.content, "完整业务分析正文");
+  assert.deepEqual(events, []);
+});
+
 test("non-triggering intent emits no insight event and does not generate", async () => {
   let generations = 0;
   const events: string[] = [];
@@ -218,6 +305,7 @@ function projectingBusinessAgent(intent: "compare" | "achievement_rate" = "compa
         fallbackContent: "完整业务分析正文", storeIds: ["S001"], startDate: "2025-05-01", endDate: "2025-05-14",
         accessRequirements: [{ tableName: "store_master", columns: ["store_id"] }],
       };
+      await request.onAnalysisPlanned?.(intent);
       const override = await request.onAnalysisReady?.(analysis);
       if (!override) request.stream?.emitContent("完整业务分析正文");
       return { intentResult: { intent, storeIds: ["S001"], startDate: null, endDate: null, relevant: true, outOfScope: false }, content: override?.content || "完整业务分析正文", storeIds: ["S001"], startDate: analysis.startDate, endDate: analysis.endDate };
@@ -226,7 +314,7 @@ function projectingBusinessAgent(intent: "compare" | "achievement_rate" = "compa
 }
 
 function insightApplication(generate: () => Promise<InsightSnapshot>): InsightApplication {
-  return { beginRequest(userId) { return { userId, requestId: "r1", startedAt: 1 }; }, activateRequest() { return true; }, generateForAnalysis: generate, async getLatest() { return null; }, async updateAction() { throw new Error("unused"); } };
+  return { beginRequest(userId) { return { userId, requestId: "r1", startedAt: 1 }; }, async activateRequest() { return true; }, generateForAnalysis: generate, async getLatest() { return null; }, async updateAction() { throw new Error("unused"); } };
 }
 
 function snapshot(): InsightSnapshot {

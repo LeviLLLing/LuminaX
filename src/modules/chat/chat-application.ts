@@ -14,6 +14,7 @@ import {
   type ChatStreamCallbacks,
 } from "@/modules/chat/chat-stream";
 import {
+  StaleInsightGenerationError,
   buildInsightReceipt,
   type InsightApplication,
 } from "@/modules/insights/insight-application";
@@ -84,6 +85,18 @@ export function createChatApplication({
         : null;
       let insightPlanObserved = false;
       let insightRequestActive = false;
+      const activateInsightRequest = async (): Promise<boolean> => {
+        if (!insightApplication || !insightToken) return false;
+        try {
+          return await insightApplication.activateRequest(insightToken);
+        } catch (error) {
+          console.error(
+            "Insight generation claim failed:",
+            error instanceof Error ? error.name : "UnknownError"
+          );
+          return false;
+        }
+      };
       stream.emitStatus("governance");
       const governanceResult = await governanceAgent.review({
         sessionId,
@@ -111,12 +124,10 @@ export function createChatApplication({
           stream,
           onAnalysisPlanned:
             insightApplication && insightToken
-              ? (intent) => {
+              ? async (intent) => {
                   insightPlanObserved = true;
                   if (shouldGenerateInsight(intent)) {
-                    insightRequestActive = insightApplication.activateRequest(
-                      insightToken
-                    );
+                    insightRequestActive = await activateInsightRequest();
                   }
                 }
               : undefined,
@@ -125,9 +136,10 @@ export function createChatApplication({
               ? async (analysis) => {
                   if (!shouldGenerateInsight(analysis.intent)) return null;
                   if (!insightPlanObserved) {
-                    insightRequestActive = insightApplication.activateRequest(
-                      insightToken
-                    );
+                    insightRequestActive = await activateInsightRequest();
+                  }
+                  if (insightRequestActive) {
+                    insightRequestActive = await activateInsightRequest();
                   }
                   if (!insightRequestActive) return null;
                   stream.emitInsight({ status: "generating" });
@@ -144,6 +156,7 @@ export function createChatApplication({
                     });
                     return { content: buildInsightReceipt(snapshot) };
                   } catch (error) {
+                    if (error instanceof StaleInsightGenerationError) return null;
                     console.error(
                       "Insight projection failed:",
                       error instanceof Error ? error.name : "UnknownError"

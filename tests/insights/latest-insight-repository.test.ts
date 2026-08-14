@@ -53,36 +53,33 @@ test("repository replaces and restores one latest snapshot per user", async () =
   );
 });
 
-test("conditional replacement restores the previous snapshot when superseded during commit", async () => {
+test("a persisted newer generation claim rejects a stale cross-instance replacement", async () => {
   const file = join(await createTemporaryDirectory(), "latest.json");
-  const seedRepository = new FileLatestInsightRepository(file);
-  await seedRepository.replaceForUser(
-    createSnapshot({ id: "old", sourceFingerprint: "old" })
-  );
+  const olderRepository = new FileLatestInsightRepository(file);
+  const newerRepository = new FileLatestInsightRepository(file);
+  const olderToken = { userId: "u1", requestId: "older", startedAt: 1 };
+  const newerToken = { userId: "u1", requestId: "newer", startedAt: 2 };
 
-  let current = true;
-  let renameCount = 0;
-  const repository = new FileLatestInsightRepository(
-    file,
-    createFileSystem({
-      async rename(oldPath, newPath) {
-        await rename(oldPath, newPath);
-        renameCount += 1;
-        if (renameCount === 1) current = false;
-      },
-    })
-  );
+  assert.equal(await olderRepository.claimGeneration(olderToken), true);
+  assert.equal(await newerRepository.claimGeneration(newerToken), true);
 
   await assert.rejects(
-    repository.replaceForUser(
+    olderRepository.replaceForUser(
       createSnapshot({ id: "new", sourceFingerprint: "new" }),
-      () => current
+      olderToken
+    ),
+    InsightConditionalWriteError
+  );
+  await assert.rejects(
+    newerRepository.replaceForUser(
+      createSnapshot({ id: "wrong-user", userId: "u2" }),
+      newerToken
     ),
     InsightConditionalWriteError
   );
 
-  assert.equal((await repository.findByUserId("u1"))?.id, "old");
-  assert.equal(renameCount, 2);
+  assert.equal(await olderRepository.findByUserId("u1"), null);
+  assert.equal(await newerRepository.findByUserId("u2"), null);
 });
 
 test("repository serializes concurrent replacements without losing users", async () => {
