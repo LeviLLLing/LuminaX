@@ -61,6 +61,7 @@ const ALLOWED_INTENTS = new Set<SystemAnalysisIntent>([
 ]);
 
 const MIN_CONFIDENCE = 0.7;
+const FALLBACK_CONFIDENCE = 0.7;
 
 export function createBusinessIntentRouter({
   model,
@@ -163,7 +164,7 @@ function fallbackResult(
 ): BusinessIntentRouteResult {
   return {
     intent,
-    confidence: 0,
+    confidence: FALLBACK_CONFIDENCE,
     source: "fallback",
     fallbackReason,
     durationMs,

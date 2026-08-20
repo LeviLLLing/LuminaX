@@ -55,16 +55,26 @@ test("model router accepts only a confident allowlisted intent", async () => {
 
   assert.equal(result.intent, "compare");
   assert.equal(result.source, "model");
+  assert.equal(result.confidence, 0.92);
   assert.equal(result.fallbackReason, null);
 });
 
 test("router falls back when the model response is not a confident exact intent object", async () => {
-  for (const response of [
-    JSON.stringify({ intent: "compare", confidence: 0.4 }),
-    JSON.stringify({ intent: "custom_metric", confidence: 0.99 }),
-    JSON.stringify({ intent: "compare", confidence: 0.99, date: "2025-05-01" }),
-    "not-json",
-    null,
+  for (const { response, fallbackReason } of [
+    {
+      response: JSON.stringify({ intent: "compare", confidence: 0.4 }),
+      fallbackReason: "low_confidence",
+    },
+    {
+      response: JSON.stringify({ intent: "custom_metric", confidence: 0.99 }),
+      fallbackReason: "invalid_intent",
+    },
+    {
+      response: JSON.stringify({ intent: "compare", confidence: 0.99, date: "2025-05-01" }),
+      fallbackReason: "invalid_intent",
+    },
+    { response: "not-json", fallbackReason: "invalid_json" },
+    { response: null, fallbackReason: "empty" },
   ]) {
     const router = createBusinessIntentRouter({
       model: new FakeAgentModel("intent-model", () => response),
@@ -78,5 +88,26 @@ test("router falls back when the model response is not a confident exact intent 
 
     assert.equal(result.intent, "compare");
     assert.equal(result.source, "fallback");
+    assert.equal(result.confidence, 0.7);
+    assert.equal(result.fallbackReason, fallbackReason);
   }
+});
+
+test("router falls back with timeout confidence when the model rejects", async () => {
+  const router = createBusinessIntentRouter({
+    model: new FakeAgentModel("intent-model", () => {
+      throw new Error("model unavailable");
+    }),
+  });
+
+  const result = await router.route({
+    question: "分析所有门店销售情况",
+    scopeHint: "all_stores",
+    previousUserQuestion: null,
+  });
+
+  assert.equal(result.intent, "compare");
+  assert.equal(result.source, "fallback");
+  assert.equal(result.confidence, 0.7);
+  assert.equal(result.fallbackReason, "timeout");
 });
