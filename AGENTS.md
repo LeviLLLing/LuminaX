@@ -71,6 +71,7 @@
 - `createBusinessAgent` in `src/modules/agents/business/business-agent.ts` exposes `execute(request): Promise<BusinessAgentResult>`.
 - It uses its own configured DeepSeek model (`DEEPSEEK_BUSINESS_MODEL` or `DEEPSEEK_MODEL`), its own `InMemoryAgentMemory`, and `BUSINESS_SYSTEM_PROMPT` from `src/modules/agents/prompts/business-system-prompt.ts`.
 - It classifies the request, obtains an authorized scope through `AccessControl.authorizeScope`, executes a fixed MySQL metric or published custom metric, then explains only the structured result. It delegates attribution explanation to the Attribution Agent.
+- Business intent routing uses `DEEPSEEK_INTENT_MODEL || DEEPSEEK_BUSINESS_MODEL || DEEPSEEK_MODEL`, with a validated positive `DEEPSEEK_INTENT_TIMEOUT_MS` default of `8000`. The router is stateless, may read one bounded previous user question, and can select only an allowlisted intent; it cannot alter entity scope, dates, store IDs, or SQL parameters.
 
 ### Attribution Agent (归因 Agent)
 - `createAttributionAgent` in `src/modules/agents/attribution/attribution-agent.ts` exposes `analyze(request): Promise<string>`.

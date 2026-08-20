@@ -36,6 +36,15 @@ export interface BusinessIntentRouteResult {
   disagreesWithFallback: boolean;
 }
 
+export interface BusinessIntentRouteEvent {
+  intent: SystemAnalysisIntent;
+  source: BusinessIntentRouteResult["source"];
+  confidenceBand: "low" | "medium" | "high";
+  durationMs: number;
+  fallbackReason: BusinessIntentRouteResult["fallbackReason"];
+  disagreesWithFallback: boolean;
+}
+
 export interface BusinessIntentRouter {
   route(input: BusinessIntentRouteInput): Promise<BusinessIntentRouteResult>;
 }
@@ -44,6 +53,7 @@ export interface CreateBusinessIntentRouterOptions {
   model: AgentModel;
   fallback?: typeof classifyIntent;
   now?: () => number;
+  onRoute?: (event: BusinessIntentRouteEvent) => void;
 }
 
 const ALLOWED_INTENTS = new Set<SystemAnalysisIntent>([
@@ -67,6 +77,7 @@ export function createBusinessIntentRouter({
   model,
   fallback = classifyIntent,
   now = Date.now,
+  onRoute,
 }: CreateBusinessIntentRouterOptions): BusinessIntentRouter {
   return {
     async route(input) {
@@ -94,22 +105,53 @@ export function createBusinessIntentRouter({
 
         if (!parsed) {
           const fallbackReason = getFallbackReason(response);
-          return fallbackResult(fallbackIntent, fallbackReason, now() - startedAt);
+          return observeRoute(
+            onRoute,
+            fallbackResult(fallbackIntent, fallbackReason, now() - startedAt)
+          );
         }
 
-        return {
+        return observeRoute(onRoute, {
           intent: parsed.intent,
           confidence: parsed.confidence,
           source: "model",
           fallbackReason: null,
           durationMs: now() - startedAt,
           disagreesWithFallback: parsed.intent !== fallbackIntent,
-        };
+        });
       } catch {
-        return fallbackResult(fallbackIntent, "timeout", now() - startedAt);
+        return observeRoute(
+          onRoute,
+          fallbackResult(fallbackIntent, "timeout", now() - startedAt)
+        );
       }
     },
   };
+}
+
+function observeRoute(
+  onRoute: CreateBusinessIntentRouterOptions["onRoute"],
+  result: BusinessIntentRouteResult
+): BusinessIntentRouteResult {
+  try {
+    onRoute?.({
+      intent: result.intent,
+      source: result.source,
+      confidenceBand: confidenceBand(result.confidence),
+      durationMs: result.durationMs,
+      fallbackReason: result.fallbackReason,
+      disagreesWithFallback: result.disagreesWithFallback,
+    });
+  } catch {
+    // Route telemetry must not affect the business request.
+  }
+  return result;
+}
+
+function confidenceBand(confidence: number): BusinessIntentRouteEvent["confidenceBand"] {
+  if (confidence < 0.8) return "low";
+  if (confidence < 0.9) return "medium";
+  return "high";
 }
 
 function parseModelRoute(

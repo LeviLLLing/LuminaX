@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createBusinessIntentRouter } from "../../src/modules/intent/business-intent-router";
+import {
+  createBusinessIntentRouter,
+  type BusinessIntentRouteEvent,
+} from "../../src/modules/intent/business-intent-router";
 import { classifyIntent } from "../../src/modules/intent/intent-classifier";
 import { FakeAgentModel } from "../fixtures/fake-agent-model";
 
@@ -57,6 +60,31 @@ test("model router accepts only a confident allowlisted intent", async () => {
   assert.equal(result.source, "model");
   assert.equal(result.confidence, 0.92);
   assert.equal(result.fallbackReason, null);
+});
+
+test("route telemetry contains no user or model text", async () => {
+  const events: BusinessIntentRouteEvent[] = [];
+  const router = createBusinessIntentRouter({
+    model: new FakeAgentModel("intent-model", () =>
+      JSON.stringify({ intent: "refund_rate", confidence: 0.88 })
+    ),
+    onRoute: (event) => events.push(event),
+  });
+
+  await router.route({
+    question: "分析退款",
+    scopeHint: "all_stores",
+    previousUserQuestion: null,
+  });
+
+  assert.deepEqual(Object.keys(events[0]).sort(), [
+    "confidenceBand",
+    "disagreesWithFallback",
+    "durationMs",
+    "fallbackReason",
+    "intent",
+    "source",
+  ]);
 });
 
 test("router falls back when the model response is not a confident exact intent object", async () => {

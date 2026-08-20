@@ -6,6 +6,7 @@ import { createBusinessAgent } from "@/modules/agents/business/business-agent";
 import { createGovernanceAgent } from "@/modules/agents/governance/governance-agent";
 import { InMemoryAgentMemory } from "@/modules/agents/shared/agent-memory";
 import { DeepSeekChatModel } from "@/modules/agents/shared/deepseek-chat-model";
+import { createBusinessIntentRouter } from "@/modules/intent/business-intent-router";
 import { createChatApplication } from "./chat-application";
 import {
   insightApplication,
@@ -17,6 +18,7 @@ const defaultModel =
 const businessAnswerTimeoutMs = Number(
   process.env.DEEPSEEK_BUSINESS_TIMEOUT_MS || 90_000
 );
+const intentTimeoutMs = readIntentTimeoutMs();
 
 const governanceAgent = createGovernanceAgent({
   model: new DeepSeekChatModel({
@@ -33,6 +35,17 @@ const attributionAgent = createAttributionAgent({
   knowledgeRetriever: new NoopAttributionKnowledgeRetriever(),
 });
 
+const intentRouter = createBusinessIntentRouter({
+  model: new DeepSeekChatModel({
+    model:
+      process.env.DEEPSEEK_INTENT_MODEL ||
+      process.env.DEEPSEEK_BUSINESS_MODEL ||
+      defaultModel,
+    timeoutMs: intentTimeoutMs,
+  }),
+  onRoute: (event) => console.info("[intent-route]", JSON.stringify(event)),
+});
+
 const businessAgent = createBusinessAgent({
   metricQueryExecutor,
   model: new DeepSeekChatModel({
@@ -41,6 +54,7 @@ const businessAgent = createBusinessAgent({
   }),
   memory: new InMemoryAgentMemory(),
   attributionAgent,
+  intentRouter,
   customMetricRuntime,
   accessControl,
 });
@@ -50,3 +64,8 @@ export const chatApplication = createChatApplication({
   businessAgent,
   insightApplication,
 });
+
+function readIntentTimeoutMs(): number {
+  const timeout = Number(process.env.DEEPSEEK_INTENT_TIMEOUT_MS || 8_000);
+  return Number.isFinite(timeout) && timeout > 0 ? timeout : 8_000;
+}
