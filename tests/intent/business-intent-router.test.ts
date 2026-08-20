@@ -87,6 +87,26 @@ test("route telemetry contains no user or model text", async () => {
   ]);
 });
 
+test("router contains rejected async route telemetry observers", async () => {
+  const router = createBusinessIntentRouter({
+    model: new FakeAgentModel("intent-model", () =>
+      JSON.stringify({ intent: "refund_rate", confidence: 0.88 })
+    ),
+    onRoute: async () => {
+      throw new Error("telemetry unavailable");
+    },
+  });
+
+  const result = await router.route({
+    question: "分析退款",
+    scopeHint: "all_stores",
+    previousUserQuestion: null,
+  });
+
+  assert.equal(result.intent, "refund_rate");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+});
+
 test("router falls back when the model response is not a confident exact intent object", async () => {
   for (const { response, fallbackReason } of [
     {

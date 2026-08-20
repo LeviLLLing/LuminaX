@@ -53,7 +53,7 @@ export interface CreateBusinessIntentRouterOptions {
   model: AgentModel;
   fallback?: typeof classifyIntent;
   now?: () => number;
-  onRoute?: (event: BusinessIntentRouteEvent) => void;
+  onRoute?: (event: BusinessIntentRouteEvent) => unknown;
 }
 
 const ALLOWED_INTENTS = new Set<SystemAnalysisIntent>([
@@ -134,7 +134,7 @@ function observeRoute(
   result: BusinessIntentRouteResult
 ): BusinessIntentRouteResult {
   try {
-    onRoute?.({
+    const observation = onRoute?.({
       intent: result.intent,
       source: result.source,
       confidenceBand: confidenceBand(result.confidence),
@@ -142,6 +142,7 @@ function observeRoute(
       fallbackReason: result.fallbackReason,
       disagreesWithFallback: result.disagreesWithFallback,
     });
+    void Promise.resolve(observation).catch(() => {});
   } catch {
     // Route telemetry must not affect the business request.
   }
