@@ -16,9 +16,20 @@ export interface IntentResult {
   outOfScope: boolean;
 }
 
-export function classifyIntent(question: string): IntentResult {
+export type IntentScopeHint =
+  | "single_store"
+  | "multi_store"
+  | "all_stores"
+  | "unspecified";
+
+export function classifyIntent(
+  question: string,
+  context: { scopeHint?: IntentScopeHint } = {}
+): IntentResult {
   const q = question.toLowerCase();
   const dateRange = extractDateRange(question);
+  const broadSales = /(销售情况|经营情况|经营表现|门店表现)/.test(question);
+  const broadStores = /(所有门店|全部门店|各门店|多门店)/.test(question);
 
   const mentionedStoreIds = [...question.matchAll(/S(\d{3})/gi)].map(
     (match) => `S${match[1]}`
@@ -43,7 +54,8 @@ export function classifyIntent(question: string): IntentResult {
   const storeIds = extractStoreIds(question);
   const relevant =
     DOMAIN_KEYWORDS.some((kw) => q.includes(kw.toLowerCase())) ||
-    storeIds.length > 0;
+    storeIds.length > 0 ||
+    broadSales;
 
   if (!relevant) {
     return {
@@ -67,6 +79,16 @@ export function classifyIntent(question: string): IntentResult {
   else if (q.includes("促销") || q.includes("优惠")) intent = "promotion_contribution";
   else if (q.includes("退款") || q.includes("取消")) intent = "refund_rate";
   else if (q.includes("异常") || q.includes("波动")) intent = "anomaly_detection";
+
+  if (
+    intent === "achievement_rate" &&
+    broadSales &&
+    (broadStores ||
+      context.scopeHint === "multi_store" ||
+      context.scopeHint === "all_stores")
+  ) {
+    intent = "compare";
+  }
 
   return {
     intent,

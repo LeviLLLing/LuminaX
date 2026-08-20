@@ -15,3 +15,4 @@ import "./insights/latest-insight-repository.test";
 import "./insights/insight-application.test";
 import "./insights/insight-routes.test";
 import "./insights/insight-client.test";
+import "./intent/business-intent-router.test";
