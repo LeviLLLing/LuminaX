@@ -15,7 +15,6 @@ import {
 } from "@/modules/chat/chat-stream";
 import {
   StaleInsightGenerationError,
-  buildInsightReceipt,
   type InsightApplication,
 } from "@/modules/insights/insight-application";
 import { shouldGenerateInsight } from "@/modules/insights/insight-trigger-policy";
@@ -183,14 +182,16 @@ export function createChatApplication({
                       actionCount: snapshot.actions.length,
                       generation: insightGeneration,
                     });
-                    return { content: buildInsightReceipt(snapshot) };
+                    return null;
                   } catch (error) {
                     if (error instanceof StaleInsightGenerationError) return null;
                     const activation = await activateInsightRequest();
                     if (activation === "superseded") return null;
                     console.error(
                       "Insight projection failed:",
-                      error instanceof Error ? error.name : "UnknownError"
+                      error instanceof Error
+                        ? `${error.name}: ${error.message}`
+                        : "UnknownError"
                     );
                     emitInsightFailure();
                     return null;

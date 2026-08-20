@@ -14,6 +14,9 @@ import {
 
 const defaultModel =
   process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
+const businessAnswerTimeoutMs = Number(
+  process.env.DEEPSEEK_BUSINESS_TIMEOUT_MS || 90_000
+);
 
 const governanceAgent = createGovernanceAgent({
   model: new DeepSeekChatModel({
@@ -34,6 +37,7 @@ const businessAgent = createBusinessAgent({
   metricQueryExecutor,
   model: new DeepSeekChatModel({
     model: process.env.DEEPSEEK_BUSINESS_MODEL || defaultModel,
+    timeoutMs: businessAnswerTimeoutMs,
   }),
   memory: new InMemoryAgentMemory(),
   attributionAgent,

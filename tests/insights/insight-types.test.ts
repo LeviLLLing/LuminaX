@@ -9,8 +9,9 @@ import {
   type InsightSnapshot,
 } from "../../src/modules/insights/insight-types";
 
-test("only meaningful analysis intents trigger an insight", () => {
+test("every computable business intent triggers an insight", () => {
   assert.deepEqual(TRIGGERING_INSIGHT_INTENTS, [
+    "achievement_rate",
     "order_trend",
     "aov_trend",
     "channel_mix",
@@ -18,20 +19,15 @@ test("only meaningful analysis intents trigger an insight", () => {
     "promotion_contribution",
     "refund_rate",
     "anomaly_detection",
+    "report",
     "compare",
     "attribution",
+    "custom_metric",
   ]);
   for (const intent of TRIGGERING_INSIGHT_INTENTS) {
     assert.equal(shouldGenerateInsight(intent), true);
   }
-  for (const intent of [
-    "achievement_rate",
-    "custom_metric",
-    "report",
-    "irrelevant",
-  ] as const) {
-    assert.equal(shouldGenerateInsight(intent), false);
-  }
+  assert.equal(shouldGenerateInsight("irrelevant"), false);
 });
 
 test("public DTO removes server-only identity and permission fields", () => {

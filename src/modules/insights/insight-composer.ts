@@ -52,9 +52,50 @@ export function createInsightComposer({ model }: { model: AgentModel }): Insight
         temperature: 0.1,
       });
       const parsed = response ? extractJsonObject(response) : null;
-      if (!parsed) throw new InsightValidationError("INVALID_MODEL_OUTPUT");
-      return parseDraft(parsed);
+      if (!parsed) return createGroundedInsightDraft(input.catalog);
+      try {
+        return parseDraft(parsed);
+      } catch (error) {
+        if (error instanceof InsightValidationError) {
+          return createGroundedInsightDraft(input.catalog);
+        }
+        throw error;
+      }
     },
+  };
+}
+
+export function createGroundedInsightDraft(
+  catalog: InsightSourceCatalog
+): InsightDraft {
+  const sources = catalog.findingSources.slice(0, 3);
+  if (sources.length === 0 || sources.some((source) => !source.evidenceCandidateIds[0])) {
+    throw new InsightValidationError("INVALID_MODEL_OUTPUT");
+  }
+  return {
+    findings: sources.map((source, index) => ({
+      sourceId: source.id,
+      severity:
+        sources.length === 1 ? "positive" : index === 0 ? "high" : "medium",
+      confidence: "needs_verification",
+      evidenceIds: [source.evidenceCandidateIds[0]],
+    })),
+    verificationItems: sources.slice(0, 2).map((source) => ({
+      sourceId: source.id,
+      hypothesis: "可能存在执行偏差，需进一步验证",
+      requiredCheck: "核查对应指标的门店明细和业务记录",
+    })),
+    actions: sources.slice(0, 2).map((source, index) => ({
+      priority: index === 0 ? "P0" : "P1",
+      title:
+        sources.length === 1
+          ? "持续跟踪关键经营指标"
+          : index === 0
+            ? "核查关键经营执行与明细"
+            : "复盘相关运营动作",
+      ownerRole: index === 0 ? "区域经理" : "运营",
+      verificationMetricCode: source.metricCode,
+    })),
   };
 }
 

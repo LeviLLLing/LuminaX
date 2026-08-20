@@ -9,7 +9,10 @@ import {
   type InsightSourceCatalog,
 } from "../../src/modules/insights/insight-source-catalog";
 import { buildInsightEvidence } from "../../src/modules/insights/evidence-builder";
-import { createInsightComposer } from "../../src/modules/insights/insight-composer";
+import {
+  createGroundedInsightDraft,
+  createInsightComposer,
+} from "../../src/modules/insights/insight-composer";
 import {
   containsNumericClaim,
   InsightValidationError,
@@ -297,11 +300,19 @@ test("composer has no memory and returns only a bounded draft", async () => {
   assert.doesNotMatch(model.requests[0].messages[0].content, /select\s|password|credential/i);
 });
 
-test("composer rejects invalid JSON and out-of-bounds drafts", async () => {
+test("composer falls back to grounded findings when model output is invalid", async () => {
   const invalidJson = createInsightComposer({ model: new FakeAgentModel("deepseek", () => "not json") });
-  await assert.rejects(() => invalidJson.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog }), (error: unknown) => error instanceof InsightValidationError && error.code === "INVALID_MODEL_OUTPUT");
+  const fallback = await invalidJson.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog });
+  assert.deepEqual(fallback.findings.map((finding) => finding.sourceId), sourceIds);
+  assert.deepEqual(
+    fallback.findings.map((finding) => finding.evidenceIds),
+    compareCatalog.findingSources.slice(0, 3).map((source) => [source.evidenceCandidateIds[0]])
+  );
+  assert.equal(fallback.verificationItems.length, 2);
+  assert.equal(fallback.actions.length, 2);
   const tooShort = createInsightComposer({ model: new FakeAgentModel("deepseek", () => JSON.stringify({ ...validDraft, findings: validDraft.findings.slice(0, 2) })) });
-  await assert.rejects(() => tooShort.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog }), InsightValidationError);
+  const recovered = await tooShort.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog });
+  assert.deepEqual(recovered.findings.map((finding) => finding.sourceId), sourceIds);
 });
 
 const materializeInput = {
@@ -437,5 +448,91 @@ test("fingerprint and formatting are deterministic and exclude question and pros
 
 test("catalog rejects insufficient authoritative material", () => {
   assert.throws(() => buildInsightSourceCatalog({ intent: "compare", analysisData: { stores: [] } }), InsightValidationError);
-  assert.throws(() => buildInsightSourceCatalog({ intent: "achievement_rate" as AnalysisIntent, analysisData: fixtures.compare }), InsightValidationError);
+  assert.throws(() => buildInsightSourceCatalog({ intent: "achievement_rate" as AnalysisIntent, analysisData: {} }), InsightValidationError);
+});
+
+test("achievement-rate SQL results form an evidence-backed insight catalog", () => {
+  const catalog = buildInsightSourceCatalog({
+    intent: "achievement_rate",
+    analysisData: {
+      stores: [
+        {
+          storeId: "S001",
+          storeName: "东店",
+          totalSales: 95000,
+          totalTarget: 100000,
+          gap: -5000,
+          achievementRate: 95,
+        },
+      ],
+      overall: {
+        totalSales: 95000,
+        totalTarget: 100000,
+        gap: -5000,
+        achievementRate: 95,
+      },
+    },
+  });
+
+  assert.ok(catalog.findingSources.length >= 3);
+  assert.ok(catalog.evidenceCandidates.length >= 3);
+  assert.ok(
+    catalog.findingSources.every((source) =>
+      source.evidenceCandidateIds.some((id) =>
+        catalog.evidenceCandidates.some((candidate) => candidate.id === id)
+      )
+    )
+  );
+});
+
+test("a single-value custom metric produces a neutral, verifiable insight", () => {
+  const catalog = buildInsightSourceCatalog({
+    intent: "custom_metric",
+    analysisData: {
+      metric: { code: "custom_sales_total", name: "自定义销售额", precision: 2 },
+      result: {
+        rows: [{ metric_value: 772076 }],
+        rowCount: 1,
+        columns: ["metric_value"],
+      },
+    },
+  });
+  const draft = createGroundedInsightDraft(catalog);
+  const snapshot = materializeInsightSnapshot({
+    userId: "user-1",
+    question: "查询自定义销售额",
+    intent: "custom_metric",
+    scope,
+    catalog,
+    draft,
+    accessRequirements: [],
+  });
+
+  assert.equal(snapshot.findings.length, 1);
+  assert.equal(snapshot.findings[0].severity, "positive");
+  assert.equal(snapshot.actions.length, 1);
+  assert.equal(snapshot.actions[0].verificationMetricCode, "custom_metric_value");
+  assert.equal(snapshot.headline, "指标值已更新，可持续跟踪");
+});
+
+test("an empty successful SQL result becomes a neutral data-availability insight", () => {
+  const catalog = buildInsightSourceCatalog({
+    intent: "report",
+    analysisData: { recordCount: 0 },
+  });
+  const draft = createGroundedInsightDraft(catalog);
+  const snapshot = materializeInsightSnapshot({
+    userId: "user-1",
+    question: "生成经营周报",
+    intent: "report",
+    scope,
+    catalog,
+    draft,
+    accessRequirements: [],
+  });
+
+  assert.equal(snapshot.findings[0].metricCode, "data_availability");
+  assert.equal(snapshot.findings[0].displayValue, "0");
+  assert.equal(snapshot.findings[0].severity, "positive");
+  assert.equal(snapshot.headline, "当前范围暂无可用经营数据，洞察已更新");
 });

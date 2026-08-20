@@ -424,13 +424,19 @@ test("business agent resolves and executes published custom metrics", async () =
   const result = await agent.execute({
     sessionId: "custom-metric-session",
     question: "查询 S001 的自定义销售额",
+    onAnalysisReady: async (analysis) => {
+      assert.equal(analysis.intent, "custom_metric");
+      assert.deepEqual(analysis.storeIds, ["S001"]);
+      assert.equal(analysis.analysisData.metric.code, "custom_sales_total");
+      assert.equal(analysis.accessRequirements[0].tableName, "store_sales_daily");
+      return { content: "洞察已更新" };
+    },
   });
 
   assert.equal(result.intentResult.intent, "custom_metric");
   assert.equal(customMetricCalls, 1);
   assert.equal(fixedMetricCalls, 0);
-  assert.match(result.content, /自定义销售额/);
-  assert.match(result.content, /772,076\.00/);
+  assert.equal(result.content, "洞察已更新");
 });
 
 test("business agent offers authorized SQL data before calling its answer model", async () => {
@@ -491,6 +497,93 @@ test("business agent announces a triggerable analysis before SQL work", async ()
     "list-stores",
     "execute-sql",
   ]);
+});
+
+test("a successful empty SQL result projects a neutral insight", async () => {
+  const agent = createBusinessAgent({
+    metricQueryExecutor: {
+      async listStoreIds() {
+        return ["S001"];
+      },
+      async execute(intent) {
+        return { intent, source: "sql", data: null };
+      },
+    },
+    model: new FakeAgentModel("business-model", () => "不应调用模型"),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  const result = await agent.execute({
+    sessionId: "empty-query-projection",
+    question: "查看 S001 的销售达成率",
+    onAnalysisReady: async (analysis) => {
+      assert.deepEqual(analysis.analysisData, { recordCount: 0 });
+      return { content: "洞察已更新：当前范围暂无业务记录。" };
+    },
+  });
+
+  assert.equal(result.content, "洞察已更新：当前范围暂无业务记录。");
+});
+
+test("an interrupted model stream is replaced by one complete SQL fallback answer", async () => {
+  const streamed: string[] = [];
+  const agent = createBusinessAgent({
+    metricQueryExecutor: compareExecutor(),
+    model: new FakeAgentModel("business-model", ({ onToken }) => {
+      onToken?.("模型回答前半段");
+      return null;
+    }),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  const result = await agent.execute({
+    sessionId: "interrupted-stream",
+    question: "对比 S001 和 S002 的门店表现",
+    stream: {
+      emitStatus() {},
+      emitReasoning() {},
+      emitContent(content) {
+        streamed.push(content);
+      },
+      emitInsight() {},
+    },
+  });
+
+  assert.deepEqual(streamed, [result.content]);
+  assert.doesNotMatch(result.content, /模型回答前半段/);
+});
+
+test("business analysis waits for one complete model response", async () => {
+  const streamed: string[] = [];
+  const model = new FakeAgentModel("business-model", (request) => {
+    assert.equal(request.onToken, undefined);
+    assert.equal(request.onReasoning, undefined);
+    return "完整趋势解读";
+  });
+  const agent = createBusinessAgent({
+    metricQueryExecutor: compareExecutor(),
+    model,
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  const result = await agent.execute({
+    sessionId: "complete-business-response",
+    question: "对比 S001 和 S002 的门店表现",
+    stream: {
+      emitStatus() {},
+      emitReasoning() {},
+      emitContent(content) {
+        streamed.push(content);
+      },
+      emitInsight() {},
+    },
+  });
+
+  assert.equal(result.content, "完整趋势解读");
+  assert.deepEqual(streamed, ["完整趋势解读"]);
 });
 
 test("a null projection keeps the existing full-answer path", async () => {

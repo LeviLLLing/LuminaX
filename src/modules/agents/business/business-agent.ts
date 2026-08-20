@@ -153,6 +153,7 @@ export function createBusinessAgent({
       }
 
       if (customMetric && customMetricRuntime) {
+        await request.onAnalysisPlanned?.("custom_metric");
         try {
           const allStoreIds = await metricQueryExecutor.listStoreIds();
           const requestedStoreIds = resolveStoreIds(
@@ -176,6 +177,35 @@ export function createBusinessAgent({
           );
           const analysisData = execution as unknown as Record<string, unknown>;
           const fallbackContent = formatCustomMetric(execution, scope);
+          if (request.onAnalysisReady) {
+            const override = await request.onAnalysisReady({
+              question: request.question,
+              intent: "custom_metric",
+              analysisData,
+              attributionNarrative: null,
+              fallbackContent,
+              storeIds: [...storeIds],
+              startDate,
+              endDate,
+              accessRequirements: structuredClone(
+                getCustomMetricAccessRequirements(customMetric)
+              ),
+            });
+            if (override) {
+              memory.remember(
+                request.sessionId,
+                { role: "user", content: request.question },
+                { role: "assistant", content: override.content }
+              );
+              return createResult(
+                intentResult,
+                override.content,
+                storeIds,
+                startDate,
+                endDate
+              );
+            }
+          }
           const content = await generateBusinessAnswer({
             model,
             memory,
@@ -276,11 +306,11 @@ export function createBusinessAgent({
             })
           : null;
 
-      if (request.onAnalysisReady && attributionData) {
+      if (request.onAnalysisReady) {
         const override = await request.onAnalysisReady({
           question: request.question,
           intent: intentResult.intent,
-          analysisData: attributionData,
+          analysisData: attributionData || { recordCount: 0 },
           attributionNarrative,
           fallbackContent,
           storeIds: [...storeIds],
@@ -405,16 +435,13 @@ async function generateBusinessAnswer({
       { role: "user", content: prompt },
     ],
     temperature: 0.2,
-    onReasoning: (delta) => streamCallbacks.emitReasoning(delta),
-    onToken: (delta) => {
-      if (!answered) {
-        answered = true;
-        streamCallbacks.emitStatus("answering");
-      }
-      streamCallbacks.emitContent(delta);
-    },
   });
+  if (!answered) {
+    answered = true;
+    streamCallbacks.emitStatus("answering");
+  }
   const result = content || fallbackContent;
+  streamCallbacks.emitContent(result);
 
   memory.remember(
     sessionId,

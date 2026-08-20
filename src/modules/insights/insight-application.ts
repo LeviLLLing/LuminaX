@@ -8,7 +8,10 @@ import {
   InsightGenerationGuard,
   type InsightGenerationToken,
 } from "./insight-generation-guard";
-import type { InsightComposer } from "./insight-composer";
+import {
+  createGroundedInsightDraft,
+  type InsightComposer,
+} from "./insight-composer";
 import {
   buildInsightSourceCatalog,
   type InsightSourceCatalog,
@@ -20,7 +23,10 @@ import {
 } from "./insight-types";
 import type { LatestInsightRepository } from "./latest-insight-repository";
 import { InsightConditionalWriteError } from "./latest-insight-repository";
-import { materializeInsightSnapshot } from "./insight-validator";
+import {
+  InsightValidationError,
+  materializeInsightSnapshot,
+} from "./insight-validator";
 
 export type InsightRequestToken = InsightGenerationToken;
 
@@ -121,15 +127,29 @@ export function createInsightApplication({
         catalog,
         attributionNarrative: analysis.attributionNarrative,
       });
-      const snapshot = materializeInsightSnapshot({
-        userId: token.userId,
-        question: analysis.question,
-        intent: analysis.intent,
-        scope,
-        catalog,
-        draft,
-        accessRequirements: analysis.accessRequirements,
-      });
+      let snapshot: InsightSnapshot;
+      try {
+        snapshot = materializeInsightSnapshot({
+          userId: token.userId,
+          question: analysis.question,
+          intent: analysis.intent,
+          scope,
+          catalog,
+          draft,
+          accessRequirements: analysis.accessRequirements,
+        });
+      } catch (error) {
+        if (!(error instanceof InsightValidationError)) throw error;
+        snapshot = materializeInsightSnapshot({
+          userId: token.userId,
+          question: analysis.question,
+          intent: analysis.intent,
+          scope,
+          catalog,
+          draft: createGroundedInsightDraft(catalog),
+          accessRequirements: analysis.accessRequirements,
+        });
+      }
       if (!guard.isCurrent(token)) throw new StaleInsightGenerationError();
       try {
         return await repository.replaceForUser(snapshot, token);

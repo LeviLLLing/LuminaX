@@ -55,6 +55,56 @@ test("successful generation saves before returning and produces a short receipt"
   assert.doesNotMatch(receipt, /门店差异值得跟进/);
 });
 
+test("semantic model draft errors fall back to a grounded insight", async () => {
+  const repository = createRepository([]);
+  const application = createInsightApplication({
+    repository,
+    guard: new InsightGenerationGuard(),
+    composer: {
+      async compose() {
+        return {
+          findings: [1, 2, 3].map((value) => ({
+            sourceId: `source-${value}`,
+            severity: "medium" as const,
+            confidence: "high" as const,
+            evidenceIds: [`evidence-${value}`],
+          })),
+          verificationItems: [],
+          actions: [
+            {
+              priority: "P0" as const,
+              title: "核查门店经营执行",
+              ownerRole: "区域经理" as const,
+              verificationMetricCode: "unknown_metric",
+            },
+            {
+              priority: "P1" as const,
+              title: "复盘运营动作",
+              ownerRole: "运营" as const,
+              verificationMetricCode: "sales",
+            },
+          ],
+        };
+      },
+    },
+    buildCatalog: () => catalog,
+    accessControl: createAllowingAccessControl(),
+    listStoreIds: async () => ["S001", "S002"],
+  });
+
+  const snapshot = await application.generateForAnalysis(
+    application.beginRequest("u1", "semantic-invalid", 1),
+    analysis
+  );
+
+  assert.equal(snapshot.findings.length, 3);
+  assert.equal(snapshot.actions.length, 2);
+  assert.deepEqual(
+    snapshot.actions.map((action) => action.verificationMetricCode),
+    ["sales", "sales"]
+  );
+});
+
 test("older concurrent analysis cannot overwrite the newer request", async () => {
   const repository = createRepository([]);
   const application = createInsightApplication({

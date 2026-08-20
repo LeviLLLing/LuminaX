@@ -34,7 +34,7 @@ export function containsNumericClaim(value: string): boolean {
 export function materializeInsightSnapshot(input: MaterializeInsightSnapshotInput): InsightSnapshot {
   const { draft, catalog } = input;
   validateDraftProse(draft);
-  if (draft.findings.length < 3 || draft.findings.length > 5 || draft.actions.length < 2 || draft.actions.length > 5 || draft.verificationItems.length > 3) {
+  if (draft.findings.length < 1 || draft.findings.length > 5 || draft.actions.length < 1 || draft.actions.length > 5 || draft.verificationItems.length > 3) {
     throw new InsightValidationError("INVALID_CARDINALITY");
   }
   const sourceIds = draft.findings.map((finding) => finding.sourceId);
@@ -136,6 +136,16 @@ export function materializeInsightSnapshot(input: MaterializeInsightSnapshotInpu
 function buildDeterministicHeadline(
   findings: InsightSnapshot["findings"]
 ): string {
+  if (
+    findings.length === 1 &&
+    findings[0].metricCode === "data_availability" &&
+    findings[0].value === 0
+  ) {
+    return "当前范围暂无可用经营数据，洞察已更新";
+  }
+  if (findings.every((finding) => finding.severity === "positive")) {
+    return `${findings[0].title}已更新，可持续跟踪`;
+  }
   return `${findings[0].title}等关键经营信号需要关注`;
 }
 

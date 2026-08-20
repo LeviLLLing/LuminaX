@@ -152,8 +152,9 @@ test("chat stream preserves a server permission error", async () => {
   }
 });
 
-test("successful insight generation emits updated after save and returns a receipt", async () => {
+test("successful insight generation emits updated and preserves the full business analysis", async () => {
   const events: string[] = [];
+  const content: string[] = [];
   let saved = false;
   const application = createChatApplication({
     governanceAgent: allowGovernance(),
@@ -166,14 +167,14 @@ test("successful insight generation emits updated after save and returns a recei
   const result = await application.execute({
     userId: "u1",
     question: "对比门店表现",
-    stream: { emitStatus() {}, emitReasoning() {}, emitContent() {}, emitInsight(event) {
+    stream: { emitStatus() {}, emitReasoning() {}, emitContent(value) { content.push(value); }, emitInsight(event) {
       if (event.status === "updated") assert.equal(saved, true);
       events.push(event.status);
     } },
   });
   assert.deepEqual(events, ["generating", "updated"]);
-  assert.match(result.content, /洞察与行动已更新/);
-  assert.doesNotMatch(result.content, /完整业务分析正文/);
+  assert.equal(result.content, "完整业务分析正文");
+  assert.deepEqual(content, ["完整业务分析正文"]);
 });
 
 test("insight failure emits failed and falls back to one full answer", async (context) => {
@@ -316,7 +317,7 @@ test("generation verification failure closes an already started lifecycle", asyn
   assert.deepEqual(events, ["generating", "failed"]);
 });
 
-test("non-triggering intent emits no insight event and does not generate", async () => {
+test("a successful achievement-rate analysis always refreshes the insight", async () => {
   let generations = 0;
   const events: string[] = [];
   const application = createChatApplication({
@@ -328,8 +329,8 @@ test("non-triggering intent emits no insight event and does not generate", async
     userId: "u1", question: "查看达成率",
     stream: { emitStatus() {}, emitReasoning() {}, emitContent() {}, emitInsight(event) { events.push(event.status); } },
   });
-  assert.equal(generations, 0);
-  assert.deepEqual(events, []);
+  assert.equal(generations, 1);
+  assert.deepEqual(events, ["generating", "updated"]);
 });
 
 function allowGovernance(): GovernanceAgent {

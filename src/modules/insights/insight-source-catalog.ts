@@ -60,6 +60,41 @@ const verificationMetricLabels: Record<string, string> = {
   trend_pct: "趋势变化率",
 };
 
+const genericMetricDefinitions: Record<
+  string,
+  { code: string; label: string; unit: Unit }
+> = {
+  totalSales: { code: "sales", label: "销售额", unit: "currency" },
+  totalTarget: { code: "target", label: "销售目标", unit: "currency" },
+  gap: { code: "sales_gap", label: "销售目标差额", unit: "currency" },
+  achievementRate: {
+    code: "achievement_rate",
+    label: "目标达成率",
+    unit: "percentage",
+  },
+  totalOrders: { code: "orders", label: "订单量", unit: "count" },
+  avgAOV: { code: "aov", label: "平均客单价", unit: "currency" },
+  totalRefund: { code: "refund", label: "退款额", unit: "currency" },
+  refundRate: { code: "refund_rate", label: "退款率", unit: "percentage" },
+  cancelRate: { code: "cancel_rate", label: "取消率", unit: "percentage" },
+  recordCount: {
+    code: "data_availability",
+    label: "可用数据记录数",
+    unit: "count",
+  },
+  metric_value: { code: "custom_metric_value", label: "指标值", unit: "count" },
+};
+
+const genericMetadataKeys = new Set([
+  "id",
+  "code",
+  "description",
+  "precision",
+  "rowCount",
+  "storeId",
+  "storeName",
+]);
+
 export function buildInsightSourceCatalog(input: CatalogInput): InsightSourceCatalog {
   const builder = new CatalogBuilder(input.intent);
   switch (input.intent) {
@@ -93,6 +128,8 @@ export function buildInsightSourceCatalog(input: CatalogInput): InsightSourceCat
     case "achievement_rate":
     case "report":
     case "custom_metric":
+      buildGeneric(builder, input.analysisData);
+      break;
     case "irrelevant":
       throw new InsightValidationError("INSUFFICIENT_SOURCE_DATA");
     default: {
@@ -103,7 +140,7 @@ export function buildInsightSourceCatalog(input: CatalogInput): InsightSourceCat
 
   const catalog = builder.build();
   if (
-    catalog.findingSources.length < 3 ||
+    catalog.findingSources.length === 0 ||
     !catalog.evidenceCandidates.some((candidate) => candidate.series.length > 0)
   ) {
     throw new InsightValidationError("INSUFFICIENT_SOURCE_DATA");
@@ -114,6 +151,7 @@ export function buildInsightSourceCatalog(input: CatalogInput): InsightSourceCat
 class CatalogBuilder {
   readonly findingSources: InsightFindingSource[] = [];
   readonly evidenceCandidates: InsightEvidenceCandidate[] = [];
+  private readonly verificationLabels = { ...verificationMetricLabels };
 
   constructor(private readonly intent: AnalysisIntent) {}
 
@@ -158,6 +196,7 @@ class CatalogBuilder {
     evidenceIds: Array<string | null>
   ): void {
     if (!isFiniteNumber(value)) return;
+    this.verificationLabels[metricCode] ||= label;
     this.findingSources.push({
       id: stableId(this.intent, path, ...subjectIds),
       metricCode,
@@ -174,9 +213,94 @@ class CatalogBuilder {
     return {
       findingSources: this.findingSources,
       evidenceCandidates: this.evidenceCandidates,
-      verificationMetricLabels: { ...verificationMetricLabels },
+      verificationMetricLabels: { ...this.verificationLabels },
     };
   }
+}
+
+interface GenericNumericFact {
+  path: string;
+  key: string;
+  value: number;
+  subject: { id: string; label: string } | null;
+}
+
+function buildGeneric(builder: CatalogBuilder, data: UnknownRecord): void {
+  for (const fact of collectGenericNumericFacts(data)) {
+    const definition = genericMetricDefinitions[fact.key] || {
+      code: `generic_${fact.path.replace(/[^a-zA-Z0-9]+/g, "_")}`,
+      label: humanizeMetricKey(fact.key),
+      unit: inferGenericUnit(fact.key),
+    };
+    const label = fact.subject
+      ? `${fact.subject.label}${definition.label}`
+      : definition.label;
+    const evidence = builder.evidence(
+      fact.path,
+      "metric_drivers",
+      label,
+      definition.unit,
+      "固定 SQL 结果",
+      [series(label, fact.value)]
+    );
+    builder.source(
+      fact.path,
+      definition.code,
+      label,
+      fact.value,
+      definition.unit,
+      fact.subject ? [fact.subject.id] : [],
+      [evidence]
+    );
+  }
+}
+
+function collectGenericNumericFacts(data: UnknownRecord): GenericNumericFact[] {
+  const facts: GenericNumericFact[] = [];
+  const visit = (
+    value: unknown,
+    path: string[],
+    subject: { id: string; label: string } | null,
+    depth: number
+  ): void => {
+    if (facts.length >= 5 || depth > 6) return;
+    if (isFiniteNumber(value)) {
+      const key = path.at(-1);
+      if (key && !genericMetadataKeys.has(key)) {
+        facts.push({ path: path.join("."), key, value, subject });
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, [...path, String(index)], subject, depth + 1));
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+
+    const recordValue = value as UnknownRecord;
+    const ownSubject = subjectOf(recordValue, "storeId", "storeName") || subject;
+    for (const [key, item] of Object.entries(recordValue)) {
+      if (genericMetadataKeys.has(key)) continue;
+      visit(item, [...path, key], ownSubject, depth + 1);
+      if (facts.length >= 5) return;
+    }
+  };
+
+  visit(data, [], null, 0);
+  return facts;
+}
+
+function inferGenericUnit(key: string): Unit {
+  const normalized = key.toLowerCase();
+  if (/(rate|pct|percentage)/.test(normalized)) return "percentage";
+  if (/(sales|target|gap|amount|aov|refund|discount|revenue)/.test(normalized)) {
+    return "currency";
+  }
+  return "count";
+}
+
+function humanizeMetricKey(key: string): string {
+  return key.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ");
 }
 
 function buildOrderTrend(builder: CatalogBuilder, data: UnknownRecord): void {
