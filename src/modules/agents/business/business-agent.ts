@@ -31,7 +31,12 @@ import {
   extractDateRange,
   extractStoreIds,
   type IntentResult,
+  type IntentScopeHint,
 } from "@/modules/intent/intent-classifier";
+import type {
+  BusinessIntentRouter,
+  SystemAnalysisIntent,
+} from "@/modules/intent/business-intent-router";
 import type {
   SqlMetricIntent,
   SqlMetricQueryExecutor,
@@ -87,6 +92,7 @@ export interface BusinessAgentDependencies {
   memory: AgentMemory;
   attributionAgent: AttributionAgent;
   customMetricRuntime?: CustomMetricRuntime;
+  intentRouter?: BusinessIntentRouter;
   accessControl?: AccessControl;
 }
 
@@ -107,30 +113,52 @@ export function createBusinessAgent({
   memory,
   attributionAgent,
   customMetricRuntime,
+  intentRouter,
   accessControl = allowAllAccessControl,
 }: BusinessAgentDependencies): BusinessAgent {
   return {
     async execute(request) {
-      const classifiedIntent = classifyIntent(request.question);
-      const customMetricMatch =
-        customMetricRuntime && !classifiedIntent.outOfScope
-          ? await customMetricRuntime.match(request.question)
-          : null;
+      const requestedStoreIds = extractStoreIds(request.question);
+      const dateRange = extractDateRange(request.question);
+      const scopeHint = resolveIntentScopeHint(
+        request.question,
+        requestedStoreIds,
+        request.storeIds
+      );
+      const deterministic = classifyIntent(request.question, { scopeHint });
+      const customMetricMatch = customMetricRuntime
+        ? await customMetricRuntime.match(request.question)
+        : { status: "none" as const, metric: null };
       const customMetric =
-        customMetricMatch?.status === "matched"
+        customMetricMatch.status === "matched"
           ? customMetricMatch.metric
           : null;
-      const customDateRange = extractDateRange(request.question);
+      const routed = customMetric
+        ? null
+        : await (intentRouter || deterministicRouter).route({
+            question: request.question,
+            scopeHint,
+            previousUserQuestion: lastUserQuestion(
+              memory.history(request.sessionId)
+            ),
+          });
+      const finalIntent = customMetric ? "custom_metric" : routed!.intent;
       const intentResult: IntentResult = customMetric
         ? {
             intent: "custom_metric",
-            storeIds: extractStoreIds(request.question),
-            startDate: customDateRange.start,
-            endDate: customDateRange.end,
+            storeIds: requestedStoreIds,
+            startDate: dateRange.start,
+            endDate: dateRange.end,
             relevant: true,
             outOfScope: false,
           }
-        : classifiedIntent;
+        : {
+            ...deterministic,
+            intent: finalIntent,
+            storeIds: requestedStoreIds,
+            startDate: dateRange.start,
+            endDate: dateRange.end,
+          };
       const startDate =
         intentResult.startDate || request.startDate || DEFAULT_START_DATE;
       const endDate =
@@ -372,6 +400,53 @@ export function createBusinessAgent({
       );
     },
   };
+}
+
+const deterministicRouter: BusinessIntentRouter = {
+  async route({ question, scopeHint }) {
+    const deterministic = classifyIntent(question, { scopeHint });
+    return {
+      intent: toSystemAnalysisIntent(deterministic.intent),
+      confidence: 1,
+      source: "fallback",
+      fallbackReason: null,
+      durationMs: 0,
+      disagreesWithFallback: false,
+    };
+  },
+};
+
+function toSystemAnalysisIntent(intent: AnalysisIntent): SystemAnalysisIntent {
+  return intent === "irrelevant" || intent === "custom_metric"
+    ? "achievement_rate"
+    : intent;
+}
+
+function resolveIntentScopeHint(
+  question: string,
+  requestedStoreIds: string[],
+  uiStoreIds: string[] | undefined
+): IntentScopeHint {
+  if (/(所有门店|全部门店|各门店|多门店)/.test(question)) {
+    return "all_stores";
+  }
+  if (requestedStoreIds.length > 1 || (uiStoreIds?.length || 0) > 1) {
+    return "multi_store";
+  }
+  if (requestedStoreIds.length === 1 || (uiStoreIds?.length || 0) === 1) {
+    return "single_store";
+  }
+  return "unspecified";
+}
+
+function lastUserQuestion(
+  messages: ReturnType<AgentMemory["history"]>
+): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user") return message.content.slice(0, 300) || null;
+  }
+  return null;
 }
 
 function toSqlMetricIntent(intent: AnalysisIntent): SqlMetricIntent | null {

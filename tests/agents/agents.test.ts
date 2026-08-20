@@ -9,6 +9,10 @@ import { createBusinessAgent } from "../../src/modules/agents/business/business-
 import { createGovernanceAgent } from "../../src/modules/agents/governance/governance-agent";
 import { InMemoryAgentMemory } from "../../src/modules/agents/shared/agent-memory";
 import type { CustomMetricRuntime } from "../../src/modules/admin/metrics/custom-metric-runtime";
+import type {
+  BusinessIntentRouteInput,
+  BusinessIntentRouter,
+} from "../../src/modules/intent/business-intent-router";
 import type { SqlMetricQueryExecutor } from "../../src/modules/metrics/sql-metric-query-executor";
 import { FakeAgentModel } from "../fixtures/fake-agent-model";
 import { createPublishedMetric } from "../fixtures/metrics";
@@ -482,6 +486,167 @@ test("business agent does not execute an ambiguous custom metric", async () => {
   assert.equal(customMetricCalls, 0);
 });
 
+test("business agent uses routed intent with deterministic dates and stores", async () => {
+  const routerInputs: BusinessIntentRouteInput[] = [];
+  const executions: Array<{ intent: string; scope: unknown }> = [];
+  const intentRouter: BusinessIntentRouter = {
+    async route(input) {
+      routerInputs.push(input);
+      return {
+        intent: "compare",
+        confidence: 0.95,
+        source: "model",
+        fallbackReason: null,
+        durationMs: 1,
+        disagreesWithFallback: true,
+      };
+    },
+  };
+  const agent = createBusinessAgent({
+    intentRouter,
+    metricQueryExecutor: {
+      async listStoreIds() { return ["S001", "S002"]; },
+      async execute(intent, scope) {
+        executions.push({ intent, scope });
+        return { intent, source: "sql", data: null };
+      },
+    },
+    model: new FakeAgentModel("business-model", () => "业务回答"),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  await agent.execute({
+    sessionId: "route-session",
+    question: "分析5月1日至5月7日所有门店销售情况",
+  });
+
+  assert.deepEqual(executions, [{
+    intent: "compare",
+    scope: {
+      storeIds: ["S001", "S002"],
+      startDate: "2025-05-01",
+      endDate: "2025-05-07",
+    },
+  }]);
+  assert.deepEqual(routerInputs, [{
+    question: "分析5月1日至5月7日所有门店销售情况",
+    scopeHint: "all_stores",
+    previousUserQuestion: null,
+  }]);
+});
+
+test("business agent skips intent routing for a matched custom metric", async () => {
+  let routeCalls = 0;
+  const metric = createPublishedMetric();
+  const agent = createBusinessAgent({
+    intentRouter: {
+      async route() {
+        routeCalls += 1;
+        throw new Error("custom metric must not route");
+      },
+    },
+    customMetricRuntime: {
+      async match() { return { status: "matched", metric }; },
+      async execute() {
+        return {
+          metric,
+          result: { rows: [], rowCount: 0, columns: [] },
+        };
+      },
+    },
+    metricQueryExecutor: emptyExecutor(),
+    model: new FakeAgentModel("business-model", () => "unused"),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  const result = await agent.execute({
+    sessionId: "matched-custom-metric",
+    question: "查询 S001 的自定义销售额",
+  });
+
+  assert.equal(result.intentResult.intent, "custom_metric");
+  assert.equal(routeCalls, 0);
+});
+
+test("business agent routes ambiguous custom metric matches through system routing", async () => {
+  let routeCalls = 0;
+  const agent = createBusinessAgent({
+    intentRouter: {
+      async route() {
+        routeCalls += 1;
+        return {
+          intent: "order_trend",
+          confidence: 0.91,
+          source: "model",
+          fallbackReason: null,
+          durationMs: 1,
+          disagreesWithFallback: true,
+        };
+      },
+    },
+    customMetricRuntime: {
+      async match() { return { status: "ambiguous", metric: null }; },
+      async execute() { throw new Error("ambiguous metric must not execute"); },
+    },
+    metricQueryExecutor: emptyExecutor(),
+    model: new FakeAgentModel("business-model", () => "业务回答"),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  const result = await agent.execute({
+    sessionId: "ambiguous-custom-routing",
+    question: "查看 S001 的销售额",
+  });
+
+  assert.equal(result.intentResult.intent, "order_trend");
+  assert.equal(routeCalls, 1);
+});
+
+test("business agent provides only the latest bounded user question to the router", async () => {
+  const memory = new InMemoryAgentMemory();
+  const previousQuestion = "上一次门店问题".repeat(100);
+  memory.remember(
+    "router-history",
+    { role: "user", content: "更早的问题" },
+    { role: "assistant", content: "更早的回答" },
+    { role: "user", content: previousQuestion },
+    { role: "assistant", content: "最近的回答" }
+  );
+  const routerInputs: BusinessIntentRouteInput[] = [];
+  const agent = createBusinessAgent({
+    intentRouter: {
+      async route(input) {
+        routerInputs.push(input);
+        return {
+          intent: "achievement_rate",
+          confidence: 0.9,
+          source: "model",
+          fallbackReason: null,
+          durationMs: 1,
+          disagreesWithFallback: false,
+        };
+      },
+    },
+    metricQueryExecutor: emptyExecutor(),
+    model: new FakeAgentModel("business-model", () => "业务回答"),
+    memory,
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  await agent.execute({
+    sessionId: "router-history",
+    question: "查看 S001 的销售达成率",
+  });
+
+  assert.equal(
+    routerInputs[0]?.previousUserQuestion,
+    previousQuestion.slice(0, 300)
+  );
+});
+
 test("business agent offers authorized SQL data before calling its answer model", async () => {
   const model = new FakeAgentModel("business-model", () => "完整业务回答");
   const agent = createBusinessAgent({
@@ -738,6 +903,15 @@ function compareExecutor(): SqlMetricQueryExecutor {
           })),
         },
       };
+    },
+  };
+}
+
+function emptyExecutor(): SqlMetricQueryExecutor {
+  return {
+    async listStoreIds() { return ["S001", "S002"]; },
+    async execute(intent) {
+      return { intent, source: "sql", data: null };
     },
   };
 }
