@@ -12,6 +12,7 @@ import {
   validateMetricSqlTemplate,
 } from "../../src/modules/admin/metrics/metric-sql-template";
 import { getCustomMetricAccessRequirements } from "../../src/modules/admin/permissions/metric-access-requirements";
+import { RegisteredCustomMetricRuntime } from "../../src/modules/admin/metrics/custom-metric-runtime";
 import { FakeAgentModel } from "../fixtures/fake-agent-model";
 import { createPublishedMetric, SAFE_CUSTOM_METRIC_SQL } from "../fixtures/metrics";
 import { InMemoryMetricRepository } from "../fixtures/repositories";
@@ -165,4 +166,48 @@ test("custom metric permissions are derived from SQL source columns", () => {
       columns: ["actual_sales", "store_id", "date"],
     },
   ]);
+});
+
+test("custom metric matching returns the unique highest-score match", async () => {
+  const repository = new InMemoryMetricRepository();
+  const metric = {
+    ...createPublishedMetric(),
+    aliases: ["销售总额"],
+  };
+  await repository.save(metric);
+  const runtime = new RegisteredCustomMetricRuntime(repository, {
+    async run() {
+      return { rows: [], rowCount: 0, columns: [] };
+    },
+  });
+
+  const result = await runtime.match("分析自定义销售额");
+
+  assert.equal(result.status, "matched");
+  assert.equal(result.metric?.id, metric.id);
+});
+
+test("custom metric matching refuses equal-score ambiguity", async () => {
+  const repository = new InMemoryMetricRepository();
+  await repository.save({
+    ...createPublishedMetric(),
+    id: "metric-a",
+    code: "repurchase_rate",
+    name: "复购率",
+    aliases: ["会员复购"],
+  });
+  await repository.save({
+    ...createPublishedMetric(),
+    id: "metric-b",
+    code: "member_rate",
+    name: "会员率",
+    aliases: ["会员复购"],
+  });
+  const runtime = new RegisteredCustomMetricRuntime(repository, {
+    async run() {
+      return { rows: [], rowCount: 0, columns: [] };
+    },
+  });
+
+  assert.equal((await runtime.match("分析会员复购")).status, "ambiguous");
 });

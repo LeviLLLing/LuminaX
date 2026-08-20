@@ -375,7 +375,9 @@ test("business agent resolves and executes published custom metrics", async () =
   const metric = createPublishedMetric();
   const customMetricRuntime: CustomMetricRuntime = {
     async match(question) {
-      return question.includes("自定义销售额") ? metric : null;
+      return question.includes("自定义销售额")
+        ? { status: "matched", metric }
+        : { status: "none", metric: null };
     },
     async execute(metricId, scope) {
       customMetricCalls += 1;
@@ -427,7 +429,14 @@ test("business agent resolves and executes published custom metrics", async () =
     onAnalysisReady: async (analysis) => {
       assert.equal(analysis.intent, "custom_metric");
       assert.deepEqual(analysis.storeIds, ["S001"]);
-      assert.equal(analysis.analysisData.metric.code, "custom_sales_total");
+      assert.ok(
+        typeof analysis.analysisData === "object" &&
+          analysis.analysisData !== null &&
+          "metric" in analysis.analysisData
+      );
+      const metric = analysis.analysisData.metric;
+      assert.ok(typeof metric === "object" && metric !== null && "code" in metric);
+      assert.equal(metric.code, "custom_sales_total");
       assert.equal(analysis.accessRequirements[0].tableName, "store_sales_daily");
       return { content: "洞察已更新" };
     },
@@ -437,6 +446,40 @@ test("business agent resolves and executes published custom metrics", async () =
   assert.equal(customMetricCalls, 1);
   assert.equal(fixedMetricCalls, 0);
   assert.equal(result.content, "洞察已更新");
+});
+
+test("business agent does not execute an ambiguous custom metric", async () => {
+  let customMetricCalls = 0;
+  const agent = createBusinessAgent({
+    customMetricRuntime: {
+      async match() {
+        return { status: "ambiguous", metric: null };
+      },
+      async execute() {
+        customMetricCalls += 1;
+        throw new Error("ambiguous custom metric must not execute");
+      },
+    },
+    metricQueryExecutor: {
+      async listStoreIds() {
+        return ["S001"];
+      },
+      async execute(intent) {
+        return { intent, source: "sql", data: null };
+      },
+    },
+    model: new FakeAgentModel("business-model", () => "固定指标回答"),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  const result = await agent.execute({
+    sessionId: "ambiguous-custom-metric",
+    question: "查看 S001 的销售额",
+  });
+
+  assert.notEqual(result.intentResult.intent, "custom_metric");
+  assert.equal(customMetricCalls, 0);
 });
 
 test("business agent offers authorized SQL data before calling its answer model", async () => {

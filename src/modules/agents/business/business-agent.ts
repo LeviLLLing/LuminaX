@@ -112,9 +112,13 @@ export function createBusinessAgent({
   return {
     async execute(request) {
       const classifiedIntent = classifyIntent(request.question);
-      const customMetric =
+      const customMetricMatch =
         customMetricRuntime && !classifiedIntent.outOfScope
           ? await customMetricRuntime.match(request.question)
+          : null;
+      const customMetric =
+        customMetricMatch?.status === "matched"
+          ? customMetricMatch.metric
           : null;
       const customDateRange = extractDateRange(request.question);
       const intentResult: IntentResult = customMetric

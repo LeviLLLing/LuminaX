@@ -14,8 +14,12 @@ export interface CustomMetricExecution {
   result: MetricQueryResult;
 }
 
+export type CustomMetricMatchResult =
+  | { status: "matched"; metric: CustomMetricDefinition }
+  | { status: "none" | "ambiguous"; metric: null };
+
 export interface CustomMetricRuntime {
-  match(question: string): Promise<CustomMetricDefinition | null>;
+  match(question: string): Promise<CustomMetricMatchResult>;
   execute(
     metricId: string,
     scope: MetricQueryScope
@@ -28,7 +32,7 @@ export class RegisteredCustomMetricRuntime implements CustomMetricRuntime {
     private readonly queryRunner: MetricQueryRunner
   ) {}
 
-  async match(question: string): Promise<CustomMetricDefinition | null> {
+  async match(question: string): Promise<CustomMetricMatchResult> {
     const normalizedQuestion = normalizeMatchText(question);
     const metrics = (await this.repository.list()).filter(
       (metric) => metric.status === "published"
@@ -48,7 +52,12 @@ export class RegisteredCustomMetricRuntime implements CustomMetricRuntime {
     });
 
     matches.sort((left, right) => right.score - left.score);
-    return matches[0]?.metric || null;
+    const top = matches[0];
+    if (!top) return { status: "none", metric: null };
+    if (matches[1]?.score === top.score) {
+      return { status: "ambiguous", metric: null };
+    }
+    return { status: "matched", metric: top.metric };
   }
 
   async execute(
