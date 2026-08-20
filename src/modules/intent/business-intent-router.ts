@@ -27,7 +27,6 @@ export type BusinessIntentRouteFallbackReason =
   | "invalid_json"
   | "invalid_intent"
   | "low_confidence"
-  | "current_question_explicit"
   | "custom_metric_ambiguous";
 
 export interface BusinessIntentRouteResult {
@@ -91,23 +90,12 @@ export function createBusinessIntentRouter({
       const startedAt = now();
       const deterministic = fallback(input.question, { scopeHint: input.scopeHint });
       const fallbackIntent = toSystemIntent(deterministic.intent);
-
-      if (
-        isExplicitCurrentIntent(
-          input.question,
-          deterministic.intent,
-          deterministic.relevant
-        )
-      ) {
-        return observeRoute(
-          onRoute,
-          fallbackResult(
-            fallbackIntent,
-            "current_question_explicit",
-            now() - startedAt
-          )
-        );
-      }
+      const previousUserQuestion = hasExplicitCurrentIntent(
+        input.question,
+        deterministic.relevant
+      )
+        ? null
+        : input.previousUserQuestion;
 
       try {
         const response = await model.complete({
@@ -118,7 +106,7 @@ export function createBusinessIntentRouter({
               content: serializePromptData({
                 question: input.question,
                 scopeHint: input.scopeHint,
-                previousUserQuestion: input.previousUserQuestion,
+                previousUserQuestion,
               }),
             },
           ],
@@ -222,7 +210,7 @@ function hasExactRouteFields(value: Record<string, unknown>): boolean {
 
 function getFallbackReason(
   response: string | null
-): Exclude<BusinessIntentRouteFallbackReason, "timeout" | "current_question_explicit" | "custom_metric_ambiguous"> {
+): Exclude<BusinessIntentRouteFallbackReason, "timeout" | "custom_metric_ambiguous"> {
   if (!response) return "empty";
 
   const parsed = extractJsonObject(response);
@@ -248,30 +236,12 @@ function fallbackResult(
   };
 }
 
-function isExplicitCurrentIntent(
-  question: string,
-  intent: AnalysisIntent,
-  relevant: boolean
-): boolean {
-  if (!relevant) return false;
-
-  const explicitMarkers: Record<SystemAnalysisIntent, RegExp> = {
-    achievement_rate: /目标|达成|完成/,
-    order_trend: /订单.*(?:趋势|变化|走势)/,
-    aov_trend: /客单价|aov/i,
-    channel_mix: /渠道|占比/,
-    daypart_analysis: /时段|早餐|午餐|下午茶|晚餐/,
-    promotion_contribution: /促销|优惠/,
-    refund_rate: /退款|取消/,
-    anomaly_detection: /异常|波动/,
-    report: /周报|报告/,
-    compare: /对比|比较|\bvs\b/i,
-    attribution: /为什么|归因|原因/,
-  };
+function hasExplicitCurrentIntent(question: string, relevant: boolean): boolean {
   return (
-    intent !== "irrelevant" &&
-    intent !== "custom_metric" &&
-    explicitMarkers[intent].test(question)
+    relevant &&
+    /目标|达成|完成|订单.*(?:趋势|变化|走势)|客单价|aov|渠道|占比|时段|早餐|午餐|下午茶|晚餐|促销|优惠|退款|取消|异常|波动|周报|报告|对比|比较|\bvs\b|为什么|归因|原因/i.test(
+      question
+    )
   );
 }
 

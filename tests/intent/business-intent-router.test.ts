@@ -63,9 +63,13 @@ test("model router accepts only a confident allowlisted intent", async () => {
 });
 
 test("current explicit intent takes precedence over conflicting history", async () => {
-  const model = new FakeAgentModel("intent-model", () =>
-    JSON.stringify({ intent: "report", confidence: 0.99 })
-  );
+  const model = new FakeAgentModel("intent-model", (request) => {
+    const payload = JSON.parse(request.messages[0].content) as {
+      previousUserQuestion: string | null;
+    };
+    assert.equal(payload.previousUserQuestion, null);
+    return JSON.stringify({ intent: "refund_rate", confidence: 0.99 });
+  });
   const router = createBusinessIntentRouter({ model });
 
   const result = await router.route({
@@ -75,9 +79,26 @@ test("current explicit intent takes precedence over conflicting history", async 
   });
 
   assert.equal(result.intent, "refund_rate");
-  assert.equal(result.source, "fallback");
-  assert.equal(result.fallbackReason, "current_question_explicit");
-  assert.equal(model.requests.length, 0);
+  assert.equal(result.source, "model");
+  assert.equal(result.fallbackReason, null);
+  assert.equal(model.requests.length, 1);
+});
+
+test("model semantically routes an explicit channel comparison", async () => {
+  const model = new FakeAgentModel("intent-model", () =>
+    JSON.stringify({ intent: "channel_mix", confidence: 0.95 })
+  );
+  const router = createBusinessIntentRouter({ model });
+
+  const result = await router.route({
+    question: "比较各渠道占比",
+    scopeHint: "all_stores",
+    previousUserQuestion: null,
+  });
+
+  assert.equal(result.intent, "channel_mix");
+  assert.equal(result.source, "model");
+  assert.equal(model.requests.length, 1);
 });
 
 test("route telemetry contains no user or model text", async () => {
