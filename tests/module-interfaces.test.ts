@@ -10,6 +10,7 @@ import "./reports/reports.test";
 import "./workbench/workbench.test";
 import "./workbench/workbench-client.test";
 import "./insights/insight-types.test";
+import "./insights/insight-attention.test";
 import "./insights/insight-generation.test";
 import "./insights/latest-insight-repository.test";
 import "./insights/insight-application.test";
