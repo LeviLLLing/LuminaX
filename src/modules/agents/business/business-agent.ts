@@ -33,10 +33,7 @@ import {
   type IntentResult,
   type IntentScopeHint,
 } from "@/modules/intent/intent-classifier";
-import type {
-  BusinessIntentRouter,
-  SystemAnalysisIntent,
-} from "@/modules/intent/business-intent-router";
+import type { BusinessIntentRouter } from "@/modules/intent/business-intent-router";
 import type {
   SqlMetricIntent,
   SqlMetricQueryExecutor,
@@ -126,6 +123,20 @@ export function createBusinessAgent({
         request.storeIds
       );
       const deterministic = classifyIntent(request.question, { scopeHint });
+      const startDate =
+        dateRange.start || request.startDate || DEFAULT_START_DATE;
+      const endDate = dateRange.end || request.endDate || DEFAULT_END_DATE;
+
+      if (deterministic.outOfScope) {
+        return createResult(
+          deterministic,
+          buildOutOfScopeMessage(),
+          [],
+          startDate,
+          endDate
+        );
+      }
+
       const customMetricMatch = customMetricRuntime
         ? await customMetricRuntime.match(request.question)
         : { status: "none" as const, metric: null };
@@ -135,14 +146,18 @@ export function createBusinessAgent({
           : null;
       const routed = customMetric
         ? null
-        : await (intentRouter || deterministicRouter).route({
+        : intentRouter
+          ? await intentRouter.route({
             question: request.question,
             scopeHint,
             previousUserQuestion: lastUserQuestion(
               memory.history(request.sessionId)
             ),
-          });
-      const finalIntent = customMetric ? "custom_metric" : routed!.intent;
+          })
+          : null;
+      const finalIntent = customMetric
+        ? "custom_metric"
+        : routed?.intent || deterministic.intent;
       const intentResult: IntentResult = customMetric
         ? {
             intent: "custom_metric",
@@ -159,10 +174,6 @@ export function createBusinessAgent({
             startDate: dateRange.start,
             endDate: dateRange.end,
           };
-      const startDate =
-        intentResult.startDate || request.startDate || DEFAULT_START_DATE;
-      const endDate =
-        intentResult.endDate || request.endDate || DEFAULT_END_DATE;
 
       if (intentResult.outOfScope) {
         return createResult(
@@ -400,26 +411,6 @@ export function createBusinessAgent({
       );
     },
   };
-}
-
-const deterministicRouter: BusinessIntentRouter = {
-  async route({ question, scopeHint }) {
-    const deterministic = classifyIntent(question, { scopeHint });
-    return {
-      intent: toSystemAnalysisIntent(deterministic.intent),
-      confidence: 1,
-      source: "fallback",
-      fallbackReason: null,
-      durationMs: 0,
-      disagreesWithFallback: false,
-    };
-  },
-};
-
-function toSystemAnalysisIntent(intent: AnalysisIntent): SystemAnalysisIntent {
-  return intent === "irrelevant" || intent === "custom_metric"
-    ? "achievement_rate"
-    : intent;
 }
 
 function resolveIntentScopeHint(

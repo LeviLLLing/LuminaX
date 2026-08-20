@@ -486,6 +486,79 @@ test("business agent does not execute an ambiguous custom metric", async () => {
   assert.equal(customMetricCalls, 0);
 });
 
+test("business agent rejects invalid-store custom metric requests before matching or SQL", async () => {
+  let customMatchCalls = 0;
+  let customMetricCalls = 0;
+  let fixedMetricCalls = 0;
+  const metric = createPublishedMetric();
+  const agent = createBusinessAgent({
+    customMetricRuntime: {
+      async match() {
+        customMatchCalls += 1;
+        return { status: "matched", metric };
+      },
+      async execute() {
+        customMetricCalls += 1;
+        return {
+          metric,
+          result: { rows: [], rowCount: 0, columns: [] },
+        };
+      },
+    },
+    metricQueryExecutor: {
+      async listStoreIds() {
+        fixedMetricCalls += 1;
+        return ["S001"];
+      },
+      async execute(intent) {
+        fixedMetricCalls += 1;
+        return { intent, source: "sql", data: null };
+      },
+    },
+    model: new FakeAgentModel("business-model", () => "unused"),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  const result = await agent.execute({
+    sessionId: "invalid-store-custom-metric",
+    question: "查询 S999 的自定义销售额",
+  });
+
+  assert.equal(result.intentResult.outOfScope, true);
+  assert.equal(customMatchCalls, 0);
+  assert.equal(customMetricCalls, 0);
+  assert.equal(fixedMetricCalls, 0);
+});
+
+test("business agent keeps irrelevant intent when no router is injected", async () => {
+  let sqlCalls = 0;
+  const agent = createBusinessAgent({
+    metricQueryExecutor: {
+      async listStoreIds() {
+        sqlCalls += 1;
+        return ["S001"];
+      },
+      async execute(intent) {
+        sqlCalls += 1;
+        return { intent, source: "sql", data: null };
+      },
+    },
+    model: new FakeAgentModel("business-model", () => "unused"),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  const result = await agent.execute({
+    sessionId: "irrelevant-no-router",
+    question: "今天天气怎么样",
+  });
+
+  assert.equal(result.intentResult.intent, "irrelevant");
+  assert.equal(result.intentResult.relevant, false);
+  assert.equal(sqlCalls, 0);
+});
+
 test("business agent uses routed intent with deterministic dates and stores", async () => {
   const routerInputs: BusinessIntentRouteInput[] = [];
   const executions: Array<{ intent: string; scope: unknown }> = [];
