@@ -21,32 +21,39 @@ export interface BusinessIntentRouteInput {
   previousUserQuestion: string | null;
 }
 
+export type BusinessIntentRouteFallbackReason =
+  | "timeout"
+  | "empty"
+  | "invalid_json"
+  | "invalid_intent"
+  | "low_confidence"
+  | "current_question_explicit"
+  | "custom_metric_ambiguous";
+
 export interface BusinessIntentRouteResult {
   intent: SystemAnalysisIntent;
   confidence: number;
   source: "model" | "fallback";
-  fallbackReason:
-    | "timeout"
-    | "empty"
-    | "invalid_json"
-    | "invalid_intent"
-    | "low_confidence"
-    | null;
+  fallbackReason: BusinessIntentRouteFallbackReason | null;
   durationMs: number;
   disagreesWithFallback: boolean;
 }
 
 export interface BusinessIntentRouteEvent {
-  intent: SystemAnalysisIntent;
-  source: BusinessIntentRouteResult["source"];
+  intent: AnalysisIntent;
+  source:
+    | BusinessIntentRouteResult["source"]
+    | "custom_metric"
+    | "custom_metric_ambiguous";
   confidenceBand: "low" | "medium" | "high";
   durationMs: number;
-  fallbackReason: BusinessIntentRouteResult["fallbackReason"];
+  fallbackReason: BusinessIntentRouteFallbackReason | null;
   disagreesWithFallback: boolean;
 }
 
 export interface BusinessIntentRouter {
   route(input: BusinessIntentRouteInput): Promise<BusinessIntentRouteResult>;
+  observe?(event: BusinessIntentRouteEvent): void;
 }
 
 export interface CreateBusinessIntentRouterOptions {
@@ -82,9 +89,25 @@ export function createBusinessIntentRouter({
   return {
     async route(input) {
       const startedAt = now();
-      const fallbackIntent = toSystemIntent(
-        fallback(input.question, { scopeHint: input.scopeHint }).intent
-      );
+      const deterministic = fallback(input.question, { scopeHint: input.scopeHint });
+      const fallbackIntent = toSystemIntent(deterministic.intent);
+
+      if (
+        isExplicitCurrentIntent(
+          input.question,
+          deterministic.intent,
+          deterministic.relevant
+        )
+      ) {
+        return observeRoute(
+          onRoute,
+          fallbackResult(
+            fallbackIntent,
+            "current_question_explicit",
+            now() - startedAt
+          )
+        );
+      }
 
       try {
         const response = await model.complete({
@@ -126,6 +149,9 @@ export function createBusinessIntentRouter({
         );
       }
     },
+    observe(event) {
+      observeEvent(onRoute, event);
+    },
   };
 }
 
@@ -133,20 +159,27 @@ function observeRoute(
   onRoute: CreateBusinessIntentRouterOptions["onRoute"],
   result: BusinessIntentRouteResult
 ): BusinessIntentRouteResult {
+  observeEvent(onRoute, {
+    intent: result.intent,
+    source: result.source,
+    confidenceBand: confidenceBand(result.confidence),
+    durationMs: result.durationMs,
+    fallbackReason: result.fallbackReason,
+    disagreesWithFallback: result.disagreesWithFallback,
+  });
+  return result;
+}
+
+function observeEvent(
+  onRoute: CreateBusinessIntentRouterOptions["onRoute"],
+  event: BusinessIntentRouteEvent
+): void {
   try {
-    const observation = onRoute?.({
-      intent: result.intent,
-      source: result.source,
-      confidenceBand: confidenceBand(result.confidence),
-      durationMs: result.durationMs,
-      fallbackReason: result.fallbackReason,
-      disagreesWithFallback: result.disagreesWithFallback,
-    });
+    const observation = onRoute?.(event);
     void Promise.resolve(observation).catch(() => {});
   } catch {
     // Route telemetry must not affect the business request.
   }
-  return result;
 }
 
 function confidenceBand(confidence: number): BusinessIntentRouteEvent["confidenceBand"] {
@@ -189,7 +222,7 @@ function hasExactRouteFields(value: Record<string, unknown>): boolean {
 
 function getFallbackReason(
   response: string | null
-): Exclude<BusinessIntentRouteResult["fallbackReason"], "timeout" | null> {
+): Exclude<BusinessIntentRouteFallbackReason, "timeout" | "current_question_explicit" | "custom_metric_ambiguous"> {
   if (!response) return "empty";
 
   const parsed = extractJsonObject(response);
@@ -202,7 +235,7 @@ function getFallbackReason(
 
 function fallbackResult(
   intent: SystemAnalysisIntent,
-  fallbackReason: Exclude<BusinessIntentRouteResult["fallbackReason"], null>,
+  fallbackReason: BusinessIntentRouteFallbackReason,
   durationMs: number
 ): BusinessIntentRouteResult {
   return {
@@ -213,6 +246,33 @@ function fallbackResult(
     durationMs,
     disagreesWithFallback: false,
   };
+}
+
+function isExplicitCurrentIntent(
+  question: string,
+  intent: AnalysisIntent,
+  relevant: boolean
+): boolean {
+  if (!relevant) return false;
+
+  const explicitMarkers: Record<SystemAnalysisIntent, RegExp> = {
+    achievement_rate: /目标|达成|完成/,
+    order_trend: /订单.*(?:趋势|变化|走势)/,
+    aov_trend: /客单价|aov/i,
+    channel_mix: /渠道|占比/,
+    daypart_analysis: /时段|早餐|午餐|下午茶|晚餐/,
+    promotion_contribution: /促销|优惠/,
+    refund_rate: /退款|取消/,
+    anomaly_detection: /异常|波动/,
+    report: /周报|报告/,
+    compare: /对比|比较|\bvs\b/i,
+    attribution: /为什么|归因|原因/,
+  };
+  return (
+    intent !== "irrelevant" &&
+    intent !== "custom_metric" &&
+    explicitMarkers[intent].test(question)
+  );
 }
 
 function toSystemIntent(intent: AnalysisIntent): SystemAnalysisIntent {

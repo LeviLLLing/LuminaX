@@ -11,6 +11,7 @@ import { InMemoryAgentMemory } from "../../src/modules/agents/shared/agent-memor
 import type { CustomMetricRuntime } from "../../src/modules/admin/metrics/custom-metric-runtime";
 import type {
   BusinessIntentRouteInput,
+  BusinessIntentRouteEvent,
   BusinessIntentRouter,
 } from "../../src/modules/intent/business-intent-router";
 import type { SqlMetricQueryExecutor } from "../../src/modules/metrics/sql-metric-query-executor";
@@ -452,6 +453,54 @@ test("business agent resolves and executes published custom metrics", async () =
   assert.equal(result.content, "洞察已更新");
 });
 
+test("business agent emits safe telemetry for a matched custom metric", async () => {
+  const events: BusinessIntentRouteEvent[] = [];
+  let customMetricCalls = 0;
+  const metric = createPublishedMetric();
+  const agent = createBusinessAgent({
+    intentRouter: {
+      async route() {
+        throw new Error("matched custom metric must not route");
+      },
+      observe(event) {
+        events.push(event);
+      },
+    },
+    customMetricRuntime: {
+      async match() {
+        return { status: "matched", metric };
+      },
+      async execute() {
+        customMetricCalls += 1;
+        return {
+          metric,
+          result: { rows: [], rowCount: 0, columns: [] },
+        };
+      },
+    },
+    metricQueryExecutor: emptyExecutor(),
+    model: new FakeAgentModel("business-model", () => "unused"),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  await agent.execute({
+    sessionId: "matched-custom-metric-telemetry",
+    question: "查询 S001 的自定义销售额",
+  });
+
+  assert.equal(customMetricCalls, 1);
+  assert.deepEqual(events.map((event) => ({
+    intent: event.intent,
+    source: event.source,
+    fallbackReason: event.fallbackReason,
+  })), [{
+    intent: "custom_metric",
+    source: "custom_metric",
+    fallbackReason: null,
+  }]);
+});
+
 test("business agent does not execute an ambiguous custom metric", async () => {
   let customMetricCalls = 0;
   const agent = createBusinessAgent({
@@ -484,6 +533,66 @@ test("business agent does not execute an ambiguous custom metric", async () => {
 
   assert.notEqual(result.intentResult.intent, "custom_metric");
   assert.equal(customMetricCalls, 0);
+});
+
+test("business agent emits distinct safe telemetry for an ambiguous custom metric", async () => {
+  const events: BusinessIntentRouteEvent[] = [];
+  let customMetricCalls = 0;
+  let fixedMetricCalls = 0;
+  const agent = createBusinessAgent({
+    intentRouter: {
+      async route() {
+        return {
+          intent: "refund_rate",
+          confidence: 0.91,
+          source: "model",
+          fallbackReason: null,
+          durationMs: 1,
+          disagreesWithFallback: false,
+        };
+      },
+      observe(event) {
+        events.push(event);
+      },
+    },
+    customMetricRuntime: {
+      async match() {
+        return { status: "ambiguous", metric: null };
+      },
+      async execute() {
+        customMetricCalls += 1;
+        throw new Error("ambiguous custom metric must not execute");
+      },
+    },
+    metricQueryExecutor: {
+      async listStoreIds() { return ["S001"]; },
+      async execute(intent) {
+        fixedMetricCalls += 1;
+        return { intent, source: "sql", data: null };
+      },
+    },
+    model: new FakeAgentModel("business-model", () => "业务回答"),
+    memory: new InMemoryAgentMemory(),
+    attributionAgent: { async analyze() { return "unused"; } },
+  });
+
+  const result = await agent.execute({
+    sessionId: "ambiguous-custom-metric-telemetry",
+    question: "查看退款",
+  });
+
+  assert.equal(result.intentResult.intent, "refund_rate");
+  assert.equal(customMetricCalls, 0);
+  assert.equal(fixedMetricCalls, 1);
+  assert.deepEqual(events.map((event) => ({
+    intent: event.intent,
+    source: event.source,
+    fallbackReason: event.fallbackReason,
+  })), [{
+    intent: "refund_rate",
+    source: "custom_metric_ambiguous",
+    fallbackReason: "custom_metric_ambiguous",
+  }]);
 });
 
 test("business agent rejects invalid-store custom metric requests before matching or SQL", async () => {

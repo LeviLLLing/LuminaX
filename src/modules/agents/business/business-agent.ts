@@ -33,7 +33,10 @@ import {
   type IntentResult,
   type IntentScopeHint,
 } from "@/modules/intent/intent-classifier";
-import type { BusinessIntentRouter } from "@/modules/intent/business-intent-router";
+import type {
+  BusinessIntentRouteEvent,
+  BusinessIntentRouter,
+} from "@/modules/intent/business-intent-router";
 import type {
   SqlMetricIntent,
   SqlMetricQueryExecutor,
@@ -137,13 +140,34 @@ export function createBusinessAgent({
         );
       }
 
+      const customMetricMatchStartedAt = Date.now();
       const customMetricMatch = customMetricRuntime
         ? await customMetricRuntime.match(request.question)
         : { status: "none" as const, metric: null };
+      const customMetricMatchDurationMs = Date.now() - customMetricMatchStartedAt;
       const customMetric =
         customMetricMatch.status === "matched"
           ? customMetricMatch.metric
           : null;
+      if (customMetric) {
+        observeIntentRoute(intentRouter, {
+          intent: "custom_metric",
+          source: "custom_metric",
+          confidenceBand: "high",
+          durationMs: customMetricMatchDurationMs,
+          fallbackReason: null,
+          disagreesWithFallback: false,
+        });
+      } else if (customMetricMatch.status === "ambiguous") {
+        observeIntentRoute(intentRouter, {
+          intent: deterministic.intent,
+          source: "custom_metric_ambiguous",
+          confidenceBand: "low",
+          durationMs: customMetricMatchDurationMs,
+          fallbackReason: "custom_metric_ambiguous",
+          disagreesWithFallback: false,
+        });
+      }
       const routed = customMetric
         ? null
         : intentRouter
@@ -438,6 +462,18 @@ function lastUserQuestion(
     if (message.role === "user") return message.content.slice(0, 300) || null;
   }
   return null;
+}
+
+function observeIntentRoute(
+  intentRouter: BusinessIntentRouter | undefined,
+  event: BusinessIntentRouteEvent
+): void {
+  try {
+    const observation = intentRouter?.observe?.(event);
+    void Promise.resolve(observation).catch(() => {});
+  } catch {
+    // Route telemetry must not affect the business request.
+  }
 }
 
 function toSqlMetricIntent(intent: AnalysisIntent): SqlMetricIntent | null {

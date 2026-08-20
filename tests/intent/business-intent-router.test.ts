@@ -62,6 +62,24 @@ test("model router accepts only a confident allowlisted intent", async () => {
   assert.equal(result.fallbackReason, null);
 });
 
+test("current explicit intent takes precedence over conflicting history", async () => {
+  const model = new FakeAgentModel("intent-model", () =>
+    JSON.stringify({ intent: "report", confidence: 0.99 })
+  );
+  const router = createBusinessIntentRouter({ model });
+
+  const result = await router.route({
+    question: "查看退款",
+    scopeHint: "unspecified",
+    previousUserQuestion: "生成周报",
+  });
+
+  assert.equal(result.intent, "refund_rate");
+  assert.equal(result.source, "fallback");
+  assert.equal(result.fallbackReason, "current_question_explicit");
+  assert.equal(model.requests.length, 0);
+});
+
 test("route telemetry contains no user or model text", async () => {
   const events: BusinessIntentRouteEvent[] = [];
   const router = createBusinessIntentRouter({
