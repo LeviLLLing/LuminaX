@@ -40,7 +40,8 @@ export function selectDiverseCandidates(
   candidates: InsightAttentionCandidate[],
   options: InsightAttentionSelectionOptions
 ): InsightAttentionCandidate[] {
-  const maxFindings = Math.max(0, options.maxFindings);
+  const quotas = normalizeQuotas(options);
+  const maxFindings = quotas.maxFindings;
   const sorted = [...candidates].sort((left, right) => {
     const scoreDifference = right.score - left.score;
     return scoreDifference !== 0
@@ -65,4 +66,17 @@ export function selectDiverseCandidates(
   }
 
   return selected;
+}
+
+function normalizeQuotas(
+  options: InsightAttentionSelectionOptions
+): InsightAttentionSelectionOptions {
+  return {
+    maxFindings: normalizeQuota(options.maxFindings),
+    minFindings: normalizeQuota(options.minFindings),
+  };
+}
+
+function normalizeQuota(value: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
