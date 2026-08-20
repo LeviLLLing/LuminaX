@@ -107,6 +107,138 @@ const fixtures: Record<string, Record<string, unknown>> = {
   },
 };
 
+function achievementStore(storeId: string, storeName: string, achievementRate: number) {
+  const totalTarget = 100000;
+  const totalSales = totalTarget * achievementRate / 100;
+  return {
+    storeId,
+    storeName,
+    totalSales,
+    totalTarget,
+    gap: totalSales - totalTarget,
+    achievementRate,
+  };
+}
+
+function achievementFixture(stores: ReturnType<typeof achievementStore>[]) {
+  const totalSales = stores.reduce((sum, store) => sum + store.totalSales, 0);
+  const totalTarget = stores.reduce((sum, store) => sum + store.totalTarget, 0);
+  return {
+    stores,
+    overall: {
+      totalSales,
+      totalTarget,
+      gap: totalSales - totalTarget,
+      achievementRate: totalSales / totalTarget * 100,
+    },
+  };
+}
+
+const reportFixture = {
+  summary: {
+    storeCount: 3,
+    totalSales: 278000,
+    totalTarget: 300000,
+    achievementRate: 92.7,
+    totalOrders: 5100,
+    avgAOV: 54.51,
+    totalRefund: 8340,
+    refundRate: 3,
+    totalCancelled: 44,
+    totalPromo: 21300,
+    promoRate: 7.7,
+  },
+  storeRanking: [
+    achievementStore("S001", "上海商场店", 102),
+    achievementStore("S004", "地铁站店", 82),
+    achievementStore("S005", "社区中心店", 94),
+  ],
+  dailyTrend: [
+    { date: "2026-08-01", sales: 47000, target: 50000, orders: 890, avgAOV: 52.81, isAnomaly: 0 },
+    { date: "2026-08-02", sales: 31000, target: 50000, orders: 640, avgAOV: 48.44, isAnomaly: 1 },
+    { date: "2026-08-03", sales: 39000, target: 50000, orders: 720, avgAOV: 54.17, isAnomaly: 1 },
+  ],
+  channelBreakdown: [{ dimensionType: "channel", dimensionName: "堂食", value: 180000, pct: 64.7 }],
+  categoryBreakdown: [{ dimensionType: "category", dimensionName: "正餐", value: 190000, pct: 68.3 }],
+  daypartBreakdown: [{ dimensionType: "daypart", dimensionName: "午餐", value: 160000, pct: 57.6 }],
+};
+
+test("achievement catalog includes every store instead of the first five values", () => {
+  const catalog = buildInsightSourceCatalog({
+    intent: "achievement_rate",
+    analysisData: achievementFixture([
+      achievementStore("S001", "上海商场店", 102),
+      achievementStore("S004", "地铁站店", 82),
+      achievementStore("S005", "社区中心店", 94),
+    ]),
+  });
+  const rateLabels = catalog.findingSources
+    .filter((item) => item.metricCode === "achievement_rate")
+    .map((item) => item.label);
+  assert.deepEqual(rateLabels, [
+    "上海商场店目标达成率",
+    "地铁站店目标达成率",
+    "社区中心店目标达成率",
+  ]);
+});
+
+test("report catalog retains semantic achievement, refund, anomaly, and structure facts", () => {
+  const catalog = buildInsightSourceCatalog({ intent: "report", analysisData: reportFixture });
+
+  assert.deepEqual(
+    catalog.findingSources
+      .filter((item) => item.metricCode === "achievement_rate")
+      .map((item) => item.label),
+    ["整体目标达成率", "上海商场店目标达成率", "地铁站店目标达成率", "社区中心店目标达成率"]
+  );
+  assert.equal(catalog.findingSources.find((item) => item.metricCode === "refund_rate")?.label, "整体退款率");
+  assert.deepEqual(
+    catalog.findingSources
+      .filter((item) => item.metricCode === "daily_anomaly")
+      .map((item) => item.subjectIds),
+    [["2026-08-02"], ["2026-08-03"]]
+  );
+  assert.deepEqual(
+    catalog.findingSources
+      .filter((item) => item.metricCode.endsWith("_structure"))
+      .map((item) => item.label),
+    ["堂食销售额", "正餐销售额", "午餐销售额"]
+  );
+});
+
+test("catalog sources include deterministic attention metadata", () => {
+  const achievementCatalog = buildInsightSourceCatalog({
+    intent: "achievement_rate",
+    analysisData: achievementFixture([
+      achievementStore("S001", "上海商场店", 102),
+      achievementStore("S004", "地铁站店", 82),
+    ]),
+  });
+  const metroRate = achievementCatalog.findingSources.find((item) => item.label === "地铁站店目标达成率");
+  assert.deepEqual(metroRate?.attention, {
+    subjectKey: "S004",
+    role: "primary",
+    signal: "achievement",
+    benchmark: 100,
+    delta: -18,
+  });
+
+  const reportCatalog = buildInsightSourceCatalog({ intent: "report", analysisData: reportFixture });
+  const anomaly = reportCatalog.findingSources.find((item) => item.metricCode === "daily_anomaly");
+  assert.deepEqual(anomaly?.attention, {
+    subjectKey: "2026-08-02",
+    role: "primary",
+    signal: "anomaly",
+    benchmark: 50000,
+    delta: -19000,
+  });
+
+  for (const intent of Object.keys(fixtures) as AnalysisIntent[]) {
+    const catalog = buildInsightSourceCatalog({ intent, analysisData: fixtures[intent] });
+    assert.ok(catalog.findingSources.every((item) => item.attention.subjectKey.length > 0));
+  }
+});
+
 const expectedCatalog = [
   ["order_trend", ["period_variance", "metric_drivers"], ["total_orders", "order_achievement_rate", "trend_pct"]],
   ["aov_trend", ["period_variance", "metric_drivers"], ["avg_aov", "target_aov", "aov_gap", "trend_pct"]],

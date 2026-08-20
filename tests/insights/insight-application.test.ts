@@ -388,6 +388,7 @@ const catalog: InsightSourceCatalog = {
     displayValue: String(value),
     subjectIds: ["S001"],
     evidenceCandidateIds: [`evidence-${value}`],
+    attention: { subjectKey: "S001", role: "primary", signal: "neutral" },
   })),
   evidenceCandidates: [1, 2, 3].map((value) => ({
     id: `evidence-${value}`,
