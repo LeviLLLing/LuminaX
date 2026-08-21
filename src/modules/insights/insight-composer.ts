@@ -134,20 +134,27 @@ function bindModelDraft(
   const verificationItems = modelDraft.verificationItems.map((item) => {
     const context = contextById.get(item.contextId);
     if (!context) throw new InsightValidationError("UNKNOWN_ACTION_CONTEXT");
-    assertModelProse([item.hypothesis, item.requiredCheck]);
+    if (context.mode === "monitor") {
+      throw new InsightValidationError("MONITOR_CONTEXT_VERIFICATION");
+    }
+    assertContextBoundModelProse(
+      [item.hypothesis, item.requiredCheck],
+      catalog,
+      context
+    );
     return {
       sourceId: context.sourceId,
-      hypothesis: item.hypothesis,
-      requiredCheck: item.requiredCheck,
+      hypothesis: `${context.subjectLabel}待验证假设：${item.hypothesis}`,
+      requiredCheck: `核查${context.subjectLabel}：${item.requiredCheck}`,
     };
   });
   const actions = modelDraft.actions.map((item) => {
     const context = contextById.get(item.contextId);
     if (!context) throw new InsightValidationError("UNKNOWN_ACTION_CONTEXT");
-    assertModelProse([item.title]);
+    assertContextBoundModelProse([item.title], catalog, context);
     return {
       priority: priorityFor(context),
-      title: item.title,
+      title: frameActionTitle(context, item.title),
       ownerRole: item.ownerRole,
       verificationMetricCode: context.verificationMetricCode,
     };
@@ -245,18 +252,51 @@ function assertUniqueContextIds(ids: string[]): void {
   }
 }
 
-function assertModelProse(values: string[]): void {
+function assertContextBoundModelProse(
+  values: string[],
+  catalog: InsightSourceCatalog,
+  context: InsightActionContext
+): void {
   if (values.some(containsNumericClaim)) {
     throw new InsightValidationError("UNSUPPORTED_NUMERIC_PROSE");
   }
   if (values.some(containsAssertedCausality)) {
     throw new InsightValidationError("UNSUPPORTED_CAUSAL_ASSERTION");
   }
+  const catalogLabels = modelForbiddenCatalogLabels(catalog);
+  if (values.some((value) => catalogLabels.some((label) => value.includes(label)))) {
+    throw new InsightValidationError("MODEL_PROSE_REFERENCES_CATALOG_LABEL");
+  }
+  if (context.mode === "monitor" && values.some(containsRemediationLanguage)) {
+    throw new InsightValidationError("MONITOR_CONTEXT_REMEDIATION");
+  }
+}
+
+function frameActionTitle(context: InsightActionContext, title: string): string {
+  if (context.mode === "monitor") return `持续跟踪${context.subjectLabel}：${title}`;
+  if (context.mode === "verify") return `核查${context.subjectLabel}：${title}`;
+  return `推进${context.subjectLabel}改善：${title}`;
+}
+
+function modelForbiddenCatalogLabels(catalog: InsightSourceCatalog): string[] {
+  const labels = [
+    ...catalog.findingSources.map((source) => source.label),
+    ...catalog.evidenceCandidates.flatMap((candidate) =>
+      candidate.series.map((item) => item.label)
+    ),
+    ...Object.values(catalog.verificationMetricLabels),
+  ];
+  return [...new Set(labels.map((label) => label.trim()).filter((label) => label.length >= 2))]
+    .sort((left, right) => right.length - left.length || left.localeCompare(right));
+}
+
+function containsRemediationLanguage(value: string): boolean {
+  return /整改|改进|改善|提升|降低|削减|压降|修复|纠正|优化|解决|处置|扭转|补救|追责|问责|remediat|improv|increase|decrease|reduce|lower|fix|correct|optimi[sz]|resolve|recover|turn around|action plan/i.test(value);
 }
 
 function containsAssertedCausality(value: string): boolean {
-  const causalLanguage = /导致|造成|引发|源于|归因于|because|caused by|results? from/i;
-  const verificationLanguage = /可能|或许|也许|疑似|待验证|需(?:要)?验证|核查|是否|假设|may|might|could|possible|verify|check|hypoth/i;
+  const causalLanguage = /导致|造成|引发|源于|归因于|由于|因为|因此|使得|受[^，。；;]{0,40}影响|\b(?:because(?:\s+of)?|due\s+to|driven\s+by|caus(?:e|es|ed|ing)(?:\s+by)?|results?\s+from|leads?\s+to|owing\s+to|as\s+a\s+result\s+of|attributable\s+to)\b/i;
+  const verificationLanguage = /可能|或许|也许|疑似|待(?:核查|验证)|需(?:要)?(?:进一步)?(?:核查|验证)|核查|验证|是否|假设|尚待|有待|不排除|\b(?:may|might|could|perhaps|possibly|possible|potential(?:ly)?|suspect(?:ed)?|hypoth(?:esis|esize|esise)?|verify|check|whether|investigat(?:e|ing|ion)|to\s+be\s+validated|needs?\s+validation)\b/i;
   return causalLanguage.test(value) && !verificationLanguage.test(value);
 }
 
