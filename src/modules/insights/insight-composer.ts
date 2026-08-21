@@ -7,16 +7,14 @@ import type {
   InsightModelDraft,
   InsightOwnerRole,
   InsightScope,
+  InsightVerificationCode,
 } from "./insight-types";
 import type {
   InsightActionContext,
   InsightAttentionPlan,
 } from "./insight-attention-plan";
 import type { InsightSourceCatalog } from "./insight-source-catalog";
-import {
-  containsNumericClaim,
-  InsightValidationError,
-} from "./insight-validator";
+import { InsightValidationError } from "./insight-validator";
 
 export interface InsightComposer {
   compose(input: {
@@ -30,9 +28,45 @@ export interface InsightComposer {
 }
 
 const MAX_ACTION_CONTEXTS = 3;
-const MAX_FRAGMENT_LENGTH = 48;
-const MAX_FRAGMENT_TERMS = 8;
 const ownerRoles: readonly InsightOwnerRole[] = ["区域经理", "店长", "运营", "财务", "数据分析"];
+const verificationTemplates = {
+  staffing_capacity: {
+    focus: "人员配置与业务承接能力",
+    check: "排班配置与业务承接记录",
+  },
+  execution_cadence: {
+    focus: "运营执行节奏与协同",
+    check: "任务节奏与执行记录",
+  },
+  product_mix: {
+    focus: "商品与品类结构",
+    check: "商品组合与品类表现记录",
+  },
+  promotion_effect: {
+    focus: "促销参与与活动效果",
+    check: "活动参与与促销表现记录",
+  },
+  traffic_conversion: {
+    focus: "客流承接与转化过程",
+    check: "客流与转化环节记录",
+  },
+  inventory_availability: {
+    focus: "库存可用性",
+    check: "库存与缺货记录",
+  },
+  service_quality: {
+    focus: "服务质量",
+    check: "服务过程与客户反馈",
+  },
+  data_quality: {
+    focus: "数据完整性与统计口径",
+    check: "来源数据与统计口径",
+  },
+} satisfies Record<InsightVerificationCode, {
+  focus: string;
+  check: string;
+}>;
+const verificationCodes = Object.keys(verificationTemplates) as InsightVerificationCode[];
 
 export function createInsightComposer({ model }: { model: AgentModel }): InsightComposer {
   return {
@@ -67,6 +101,10 @@ export function createInsightComposer({ model }: { model: AgentModel }): Insight
                   input.catalog.verificationMetricLabels[context.verificationMetricCode],
               })),
               allowedOwnerRoles: ownerRoles,
+              allowedVerificationCodes: verificationCodes.map((code) => ({
+                code,
+                meaning: verificationTemplates[code].focus,
+              })),
               attributionNarrative: input.attributionNarrative || undefined,
             }),
           }],
@@ -139,12 +177,11 @@ function bindModelDraft(
     if (context.mode === "monitor") {
       throw new InsightValidationError("MONITOR_CONTEXT_VERIFICATION");
     }
-    const topic = validatedFragment(item.topic, catalog);
-    const checkFocus = validatedFragment(item.checkFocus, catalog);
+    const template = verificationTemplates[item.verificationCode];
     return {
       sourceId: context.sourceId,
-      hypothesis: `${context.subjectLabel}可能与${topic}相关，需进一步验证`,
-      requiredCheck: `核查${context.subjectLabel}相关的${checkFocus}`,
+      hypothesis: `${context.subjectLabel}可能需要从${template.focus}角度进一步验证`,
+      requiredCheck: `核查${context.subjectLabel}相关的${template.check}`,
     };
   });
   const actions = modelDraft.actions.map((item) => {
@@ -173,11 +210,10 @@ function parseModelDraft(value: Record<string, unknown>): InsightModelDraft {
   assertExactKeys(value, ["verificationItems", "actions"]);
   return {
     verificationItems: array(value.verificationItems).map((item) => {
-      assertExactKeys(item, ["contextId", "topic", "checkFocus"]);
+      assertExactKeys(item, ["contextId", "verificationCode"]);
       return {
         contextId: stringField(item, "contextId"),
-        topic: stringField(item, "topic"),
-        checkFocus: stringField(item, "checkFocus"),
+        verificationCode: enumField(item, "verificationCode", verificationCodes),
       };
     }),
     actions: array(value.actions).map((item) => {
@@ -256,69 +292,10 @@ function assertUniqueContextIds(ids: string[]): void {
   }
 }
 
-function validatedFragment(value: string, catalog: InsightSourceCatalog): string {
-  const fragment = value.trim();
-  const terms = fragment.split(/[\s、/&+\-]+/u).filter(Boolean);
-  if (
-    Array.from(fragment).length < 2 ||
-    Array.from(fragment).length > MAX_FRAGMENT_LENGTH ||
-    terms.length > MAX_FRAGMENT_TERMS
-  ) {
-    throw new InsightValidationError("INVALID_MODEL_FRAGMENT");
-  }
-  if (containsNumericClaim(fragment)) {
-    throw new InsightValidationError("UNSUPPORTED_NUMERIC_PROSE");
-  }
-  if (!/^[\p{Letter}\p{Mark}\s、/&+\-]+$/u.test(fragment)) {
-    throw new InsightValidationError("INVALID_MODEL_FRAGMENT");
-  }
-  const normalized = normalizeSemanticText(fragment);
-  if (modelForbiddenCatalogLabels(catalog).some((label) => normalized.includes(normalizeSemanticText(label)))) {
-    throw new InsightValidationError("MODEL_PROSE_REFERENCES_CATALOG_LABEL");
-  }
-  if (containsSubjectOrLocation(fragment) || containsSentenceLanguage(fragment)) {
-    throw new InsightValidationError("INVALID_MODEL_FRAGMENT");
-  }
-  return fragment;
-}
-
 function actionTitle(context: InsightActionContext): string {
   if (context.mode === "monitor") return `持续跟踪${context.subjectLabel}`;
   if (context.mode === "verify") return `核查${context.subjectLabel}并补充判断基准`;
   return `核查并推进${context.subjectLabel}改善`;
-}
-
-function modelForbiddenCatalogLabels(catalog: InsightSourceCatalog): string[] {
-  const subjectLabels = catalog.evidenceCandidates.flatMap((candidate) =>
-    candidate.series.flatMap((item) => subjectAliases(item.label))
-  );
-  const labels = [
-    ...catalog.findingSources.map((source) => source.label),
-    ...catalog.evidenceCandidates.flatMap((candidate) =>
-      candidate.series.map((item) => item.label)
-    ),
-    ...Object.values(catalog.verificationMetricLabels),
-    ...subjectLabels,
-  ];
-  return [...new Set(labels.map((label) => label.trim()).filter((label) => label.length >= 2))]
-    .sort((left, right) => right.length - left.length || left.localeCompare(right));
-}
-
-function subjectAliases(label: string): string[] {
-  const withoutLocationKind = label.replace(/(?:商场店|社区中心店|地铁站店|门店|分店|网点|店)$/u, "").trim();
-  return withoutLocationKind === label ? [label] : [label, withoutLocationKind];
-}
-
-function normalizeSemanticText(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
-}
-
-function containsSubjectOrLocation(value: string): boolean {
-  return /门店|商场|社区|地铁|分店|网点|区域|地点|位置|城市|省份|市区|街道|\b(?:store|shop|branch|location|mall|community|station|city|district|province|shanghai|beijing)\b/iu.test(value);
-}
-
-function containsSentenceLanguage(value: string): boolean {
-  return /可能|或许|也许|疑似|待验证|需要|需|应当|应该|必须|建议|核查|验证|跟踪|监控|导致|致使|使得|造成|引发|源于|归因|由于|因为|因此|所以|从而|受.+影响|调整|整改|改进|改善|提升|降低|削减|压降|修复|纠正|优化|解决|处置|扭转|补救|追责|问责|缓解|但|但是|然而|如果|则|\b(?:may|might|could|should|must|need|because|due|caus\w*|stem\w*|driv\w*|result\w*|lead\w*|adjust\w*|mitigat\w*|remediat\w*|improv\w*|increase\w*|decrease\w*|reduce\w*|lower\w*|fix\w*|correct\w*|optimi[sz]\w*|resolve\w*|recover\w*|verify\w*|check\w*|monitor\w*|track\w*|however|although|if|then)\b/iu.test(value);
 }
 
 function assertExactKeys(value: Record<string, unknown>, expected: readonly string[]): void {

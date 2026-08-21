@@ -127,11 +127,20 @@ export interface InsightDraft {
   }>;
 }
 
+export type InsightVerificationCode =
+  | "staffing_capacity"
+  | "execution_cadence"
+  | "product_mix"
+  | "promotion_effect"
+  | "traffic_conversion"
+  | "inventory_availability"
+  | "service_quality"
+  | "data_quality";
+
 export interface InsightModelDraft {
   verificationItems: Array<{
     contextId: string;
-    topic: string;
-    checkFocus: string;
+    verificationCode: InsightVerificationCode;
   }>;
   actions: Array<{
     contextId: string;
