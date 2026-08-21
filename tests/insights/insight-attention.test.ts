@@ -112,6 +112,20 @@ test("attribution retains same-scope negative decomposition drivers as determini
   assert.deepEqual(plan.actionContexts.map((context) => context.sourceId), [plan.findings[0]?.sourceId]);
 });
 
+test("attribution selects every negative decomposition driver before positive supports fill the quota", () => {
+  const catalog = sameScopeAttributionCatalog({
+    interaction: -20,
+    positiveFactors: ["渠道", "品类", "时段", "活动"],
+  });
+  const plan = buildInsightAttentionPlan({ intent: "attribution", catalog });
+
+  assert.deepEqual(
+    plan.findings.map((finding) => sourceOfFinding(catalog, finding.sourceId).label),
+    ["订单量差异", "客单价差异", "交互项", "渠道", "品类"]
+  );
+  assert.deepEqual(plan.findings.slice(0, 3).map((finding) => finding.severity), ["high", "medium", "medium"]);
+});
+
 test("report no-data catalog keeps its positive availability finding and monitor action", () => {
   const catalog = reportNoDataCatalog();
   const plan = buildInsightAttentionPlan({ intent: "report", catalog });
@@ -780,7 +794,10 @@ function attributionCatalog(
   });
 }
 
-function sameScopeAttributionCatalog(): InsightSourceCatalog {
+function sameScopeAttributionCatalog(options: {
+  interaction?: number;
+  positiveFactors?: string[];
+} = {}): InsightSourceCatalog {
   return buildInsightSourceCatalog({
     intent: "attribution",
     analysisData: {
@@ -795,8 +812,13 @@ function sameScopeAttributionCatalog(): InsightSourceCatalog {
         totalGap: -200,
         orderVolumeGap: -120,
         aovGap: -80,
-        interaction: 0,
+        interaction: options.interaction ?? 0,
       },
+      factorContributions: (options.positiveFactors || []).map((factor, index) => ({
+        factor,
+        label: factor,
+        contribution: 1_000 - index,
+      })),
     },
   });
 }

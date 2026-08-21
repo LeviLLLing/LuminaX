@@ -30,18 +30,28 @@ function buildAttributionPlan(catalog: InsightSourceCatalog): InsightAttentionPl
 
   if (negativeDrivers.length > 0) {
     const largestNegativeDriver = largestMagnitude(negativeDrivers);
-    const selected = selectDiverseCandidates([
-      ...negativeDrivers.map((source) => candidate(
+    const negativeCandidates = negativeDrivers.map((source) => candidate(
         source,
         source === largestNegativeDriver ? "high" : "medium",
         Math.abs(source.value),
         source === largestNegativeDriver ? "primary" : "support"
-      )),
-      ...drivers
+      ));
+    const selectedNegatives = selectDiverseCandidates(negativeCandidates, {
+      maxFindings: 5,
+      minFindings: 1,
+    });
+    const selectedPositives = selectDiverseCandidates(
+      drivers
         .filter((source) => source.value > 0)
         .map((source) => candidate(source, "positive", Math.abs(source.value), "support")),
-    ], { maxFindings: 5, minFindings: 1 });
-    return planFromCandidates(catalog, selected, "risk", "improve");
+      { maxFindings: 5 - selectedNegatives.length, minFindings: 0 }
+    );
+    return planFromCandidates(
+      catalog,
+      [...selectedNegatives, ...selectedPositives],
+      "risk",
+      "improve"
+    );
   }
 
   const positiveDrivers = drivers.filter((source) => source.value > 0);
