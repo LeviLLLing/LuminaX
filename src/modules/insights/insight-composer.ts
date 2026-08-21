@@ -30,6 +30,8 @@ export interface InsightComposer {
 }
 
 const MAX_ACTION_CONTEXTS = 3;
+const MAX_FRAGMENT_LENGTH = 48;
+const MAX_FRAGMENT_TERMS = 8;
 const ownerRoles: readonly InsightOwnerRole[] = ["区域经理", "店长", "运营", "财务", "数据分析"];
 
 export function createInsightComposer({ model }: { model: AgentModel }): InsightComposer {
@@ -137,24 +139,20 @@ function bindModelDraft(
     if (context.mode === "monitor") {
       throw new InsightValidationError("MONITOR_CONTEXT_VERIFICATION");
     }
-    assertContextBoundModelProse(
-      [item.hypothesis, item.requiredCheck],
-      catalog,
-      context
-    );
+    const topic = validatedFragment(item.topic, catalog);
+    const checkFocus = validatedFragment(item.checkFocus, catalog);
     return {
       sourceId: context.sourceId,
-      hypothesis: `${context.subjectLabel}待验证假设：${item.hypothesis}`,
-      requiredCheck: `核查${context.subjectLabel}：${item.requiredCheck}`,
+      hypothesis: `${context.subjectLabel}可能与${topic}相关，需进一步验证`,
+      requiredCheck: `核查${context.subjectLabel}相关的${checkFocus}`,
     };
   });
   const actions = modelDraft.actions.map((item) => {
     const context = contextById.get(item.contextId);
     if (!context) throw new InsightValidationError("UNKNOWN_ACTION_CONTEXT");
-    assertContextBoundModelProse([item.title], catalog, context);
     return {
       priority: priorityFor(context),
-      title: frameActionTitle(context, item.title),
+      title: actionTitle(context),
       ownerRole: item.ownerRole,
       verificationMetricCode: context.verificationMetricCode,
     };
@@ -172,17 +170,23 @@ function bindModelDraft(
 }
 
 function parseModelDraft(value: Record<string, unknown>): InsightModelDraft {
+  assertExactKeys(value, ["verificationItems", "actions"]);
   return {
-    verificationItems: array(value.verificationItems).map((item) => ({
-      contextId: stringField(item, "contextId"),
-      hypothesis: stringField(item, "hypothesis"),
-      requiredCheck: stringField(item, "requiredCheck"),
-    })),
-    actions: array(value.actions).map((item) => ({
-      contextId: stringField(item, "contextId"),
-      title: stringField(item, "title"),
-      ownerRole: enumField(item, "ownerRole", ownerRoles),
-    })),
+    verificationItems: array(value.verificationItems).map((item) => {
+      assertExactKeys(item, ["contextId", "topic", "checkFocus"]);
+      return {
+        contextId: stringField(item, "contextId"),
+        topic: stringField(item, "topic"),
+        checkFocus: stringField(item, "checkFocus"),
+      };
+    }),
+    actions: array(value.actions).map((item) => {
+      assertExactKeys(item, ["contextId", "ownerRole"]);
+      return {
+        contextId: stringField(item, "contextId"),
+        ownerRole: enumField(item, "ownerRole", ownerRoles),
+      };
+    }),
   };
 }
 
@@ -252,52 +256,77 @@ function assertUniqueContextIds(ids: string[]): void {
   }
 }
 
-function assertContextBoundModelProse(
-  values: string[],
-  catalog: InsightSourceCatalog,
-  context: InsightActionContext
-): void {
-  if (values.some(containsNumericClaim)) {
+function validatedFragment(value: string, catalog: InsightSourceCatalog): string {
+  const fragment = value.trim();
+  const terms = fragment.split(/[\s、/&+\-]+/u).filter(Boolean);
+  if (
+    Array.from(fragment).length < 2 ||
+    Array.from(fragment).length > MAX_FRAGMENT_LENGTH ||
+    terms.length > MAX_FRAGMENT_TERMS
+  ) {
+    throw new InsightValidationError("INVALID_MODEL_FRAGMENT");
+  }
+  if (containsNumericClaim(fragment)) {
     throw new InsightValidationError("UNSUPPORTED_NUMERIC_PROSE");
   }
-  if (values.some(containsAssertedCausality)) {
-    throw new InsightValidationError("UNSUPPORTED_CAUSAL_ASSERTION");
+  if (!/^[\p{Letter}\p{Mark}\s、/&+\-]+$/u.test(fragment)) {
+    throw new InsightValidationError("INVALID_MODEL_FRAGMENT");
   }
-  const catalogLabels = modelForbiddenCatalogLabels(catalog);
-  if (values.some((value) => catalogLabels.some((label) => value.includes(label)))) {
+  const normalized = normalizeSemanticText(fragment);
+  if (modelForbiddenCatalogLabels(catalog).some((label) => normalized.includes(normalizeSemanticText(label)))) {
     throw new InsightValidationError("MODEL_PROSE_REFERENCES_CATALOG_LABEL");
   }
-  if (context.mode === "monitor" && values.some(containsRemediationLanguage)) {
-    throw new InsightValidationError("MONITOR_CONTEXT_REMEDIATION");
+  if (containsSubjectOrLocation(fragment) || containsSentenceLanguage(fragment)) {
+    throw new InsightValidationError("INVALID_MODEL_FRAGMENT");
   }
+  return fragment;
 }
 
-function frameActionTitle(context: InsightActionContext, title: string): string {
-  if (context.mode === "monitor") return `持续跟踪${context.subjectLabel}：${title}`;
-  if (context.mode === "verify") return `核查${context.subjectLabel}：${title}`;
-  return `推进${context.subjectLabel}改善：${title}`;
+function actionTitle(context: InsightActionContext): string {
+  if (context.mode === "monitor") return `持续跟踪${context.subjectLabel}`;
+  if (context.mode === "verify") return `核查${context.subjectLabel}并补充判断基准`;
+  return `核查并推进${context.subjectLabel}改善`;
 }
 
 function modelForbiddenCatalogLabels(catalog: InsightSourceCatalog): string[] {
+  const subjectLabels = catalog.evidenceCandidates.flatMap((candidate) =>
+    candidate.series.flatMap((item) => subjectAliases(item.label))
+  );
   const labels = [
     ...catalog.findingSources.map((source) => source.label),
     ...catalog.evidenceCandidates.flatMap((candidate) =>
       candidate.series.map((item) => item.label)
     ),
     ...Object.values(catalog.verificationMetricLabels),
+    ...subjectLabels,
   ];
   return [...new Set(labels.map((label) => label.trim()).filter((label) => label.length >= 2))]
     .sort((left, right) => right.length - left.length || left.localeCompare(right));
 }
 
-function containsRemediationLanguage(value: string): boolean {
-  return /整改|改进|改善|提升|降低|削减|压降|修复|纠正|优化|解决|处置|扭转|补救|追责|问责|remediat|improv|increase|decrease|reduce|lower|fix|correct|optimi[sz]|resolve|recover|turn around|action plan/i.test(value);
+function subjectAliases(label: string): string[] {
+  const withoutLocationKind = label.replace(/(?:商场店|社区中心店|地铁站店|门店|分店|网点|店)$/u, "").trim();
+  return withoutLocationKind === label ? [label] : [label, withoutLocationKind];
 }
 
-function containsAssertedCausality(value: string): boolean {
-  const causalLanguage = /导致|造成|引发|源于|归因于|由于|因为|因此|使得|受[^，。；;]{0,40}影响|\b(?:because(?:\s+of)?|due\s+to|driven\s+by|caus(?:e|es|ed|ing)(?:\s+by)?|results?\s+from|leads?\s+to|owing\s+to|as\s+a\s+result\s+of|attributable\s+to)\b/i;
-  const verificationLanguage = /可能|或许|也许|疑似|待(?:核查|验证)|需(?:要)?(?:进一步)?(?:核查|验证)|核查|验证|是否|假设|尚待|有待|不排除|\b(?:may|might|could|perhaps|possibly|possible|potential(?:ly)?|suspect(?:ed)?|hypoth(?:esis|esize|esise)?|verify|check|whether|investigat(?:e|ing|ion)|to\s+be\s+validated|needs?\s+validation)\b/i;
-  return causalLanguage.test(value) && !verificationLanguage.test(value);
+function normalizeSemanticText(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+}
+
+function containsSubjectOrLocation(value: string): boolean {
+  return /门店|商场|社区|地铁|分店|网点|区域|地点|位置|城市|省份|市区|街道|\b(?:store|shop|branch|location|mall|community|station|city|district|province|shanghai|beijing)\b/iu.test(value);
+}
+
+function containsSentenceLanguage(value: string): boolean {
+  return /可能|或许|也许|疑似|待验证|需要|需|应当|应该|必须|建议|核查|验证|跟踪|监控|导致|致使|使得|造成|引发|源于|归因|由于|因为|因此|所以|从而|受.+影响|调整|整改|改进|改善|提升|降低|削减|压降|修复|纠正|优化|解决|处置|扭转|补救|追责|问责|缓解|但|但是|然而|如果|则|\b(?:may|might|could|should|must|need|because|due|caus\w*|stem\w*|driv\w*|result\w*|lead\w*|adjust\w*|mitigat\w*|remediat\w*|improv\w*|increase\w*|decrease\w*|reduce\w*|lower\w*|fix\w*|correct\w*|optimi[sz]\w*|resolve\w*|recover\w*|verify\w*|check\w*|monitor\w*|track\w*|however|although|if|then)\b/iu.test(value);
+}
+
+function assertExactKeys(value: Record<string, unknown>, expected: readonly string[]): void {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  if (actual.length !== sortedExpected.length || actual.some((key, index) => key !== sortedExpected[index])) {
+    throw new InsightValidationError("INVALID_MODEL_OUTPUT");
+  }
 }
 
 function array(value: unknown): Record<string, unknown>[] {

@@ -130,12 +130,11 @@ export interface InsightDraft {
 export interface InsightModelDraft {
   verificationItems: Array<{
     contextId: string;
-    hypothesis: string;
-    requiredCheck: string;
+    topic: string;
+    checkFocus: string;
   }>;
   actions: Array<{
     contextId: string;
-    title: string;
     ownerRole: InsightOwnerRole;
   }>;
 }

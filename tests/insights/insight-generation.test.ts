@@ -541,7 +541,7 @@ const validDraft: InsightDraft = {
   ],
 };
 
-test("composer locks findings before DeepSeek and maps model prose through action contexts", async () => {
+test("composer rejects a DeepSeek attempt to select findings and keeps the same plan fallback", async () => {
   const priorityCatalog = buildInsightSourceCatalog({
     intent: "achievement_rate",
     analysisData: achievementFixture([
@@ -567,12 +567,11 @@ test("composer locks findings before DeepSeek and maps model prose through actio
     }],
     verificationItems: contexts.map((context) => ({
       contextId: context.id,
-      hypothesis: "可能存在执行偏差",
-      requiredCheck: "核查门店经营记录",
+      topic: "排班与履约节奏",
+      checkFocus: "排班记录与履约明细",
     })),
     actions: contexts.map((context) => ({
       contextId: context.id,
-      title: "复盘门店经营执行",
       ownerRole: "运营",
     })),
   };
@@ -580,15 +579,8 @@ test("composer locks findings before DeepSeek and maps model prose through actio
   const composer = createInsightComposer({ model });
   const result = await composer.compose({ question: "查看目标达成", intent: "achievement_rate", scope, catalog: priorityCatalog, plan, attributionNarrative: "订单贡献偏弱" });
 
-  assert.deepEqual(result.findings, plan.findings);
+  assert.deepEqual(result, createGroundedInsightDraft(priorityCatalog, plan));
   assert.equal(result.findings.some((finding) => finding.sourceId === shanghaiSource.id), false);
-  assert.deepEqual(
-    result.actions.map(({ priority, verificationMetricCode }) => ({ priority, verificationMetricCode })),
-    contexts.map((context) => ({
-      priority: context.severity === "high" ? "P0" : context.severity === "medium" ? "P1" : "P2",
-      verificationMetricCode: context.verificationMetricCode,
-    }))
-  );
   assert.equal(model.requests.length, 1);
   assert.equal(model.requests[0].temperature, 0.1);
   assert.equal(model.requests[0].messages.length, 1);
@@ -598,7 +590,7 @@ test("composer locks findings before DeepSeek and maps model prose through actio
   assert.doesNotMatch(model.requests[0].messages[0].content, /select\s|password|credential/i);
 });
 
-test("composer rejects a valid context ID paired with a known non-context subject", async () => {
+test("composer rejects a partial non-context subject in a verification fragment", async () => {
   const catalog = buildInsightSourceCatalog({
     intent: "achievement_rate",
     analysisData: achievementFixture([
@@ -613,12 +605,11 @@ test("composer rejects a valid context ID paired with a known non-context subjec
   const modelDraft = {
     verificationItems: [{
       contextId: metroContext.id,
-      hypothesis: "上海商场店可能存在执行偏差",
-      requiredCheck: "核查上海商场店经营记录",
+      topic: "上海门店排班",
+      checkFocus: "排班记录与履约明细",
     }],
     actions: [{
       contextId: metroContext.id,
-      title: "复盘上海商场店经营执行",
       ownerRole: "运营",
     }],
   };
@@ -632,7 +623,7 @@ test("composer rejects a valid context ID paired with a known non-context subjec
   );
 });
 
-test("healthy monitor context rejects remediation actions", async () => {
+test("healthy monitor context rejects any model-authored action command", async () => {
   const catalog = buildInsightSourceCatalog({
     intent: "achievement_rate",
     analysisData: achievementFixture([
@@ -643,24 +634,27 @@ test("healthy monitor context rejects remediation actions", async () => {
   const plan = buildInsightAttentionPlan({ intent: "achievement_rate", catalog });
   const context = plan.actionContexts[0];
   assert.equal(context.mode, "monitor");
-  const composer = createInsightComposer({
-    model: new FakeAgentModel("deepseek", () => JSON.stringify({
-      verificationItems: [],
-      actions: [{
-        contextId: context.id,
-        title: "立即整改门店经营问题",
-        ownerRole: "运营",
-      }],
-    })),
-  });
+  for (const command of ["调整", "mitigate"]) {
+    const composer = createInsightComposer({
+      model: new FakeAgentModel("deepseek", () => JSON.stringify({
+        verificationItems: [],
+        actions: [{
+          contextId: context.id,
+          command,
+          ownerRole: "运营",
+        }],
+      })),
+    });
 
-  assert.deepEqual(
-    await composer.compose({ question: "查看目标达成", intent: "achievement_rate", scope, catalog, plan }),
-    createGroundedInsightDraft(catalog, plan)
-  );
+    assert.deepEqual(
+      await composer.compose({ question: "查看目标达成", intent: "achievement_rate", scope, catalog, plan }),
+      createGroundedInsightDraft(catalog, plan),
+      command
+    );
+  }
 });
 
-test("server frames accepted monitor prose with the deterministic subject and mode", async () => {
+test("server authors the complete monitor-only action command", async () => {
   const catalog = buildInsightSourceCatalog({
     intent: "achievement_rate",
     analysisData: achievementFixture([
@@ -675,23 +669,21 @@ test("server frames accepted monitor prose with the deterministic subject and mo
       verificationItems: [],
       actions: [{
         contextId: context.id,
-        title: "关注经营变化",
         ownerRole: "运营",
       }],
     })),
   });
 
   const result = await composer.compose({ question: "查看目标达成", intent: "achievement_rate", scope, catalog, plan });
-  assert.equal(result.actions[0].title, `持续跟踪${context.subjectLabel}：关注经营变化`);
+  assert.equal(result.actions[0].title, `持续跟踪${context.subjectLabel}`);
 });
 
-test("composer uses the same plan fallback for null, malformed, unbound, numeric, and incomplete model drafts", async () => {
+test("composer uses the same plan fallback for null, malformed, unbound, numeric, extra, and incomplete model drafts", async () => {
   const highContext = comparePlan.actionContexts.find((context) => context.severity === "high");
   assert.ok(highContext);
   const nonHighContext = comparePlan.actionContexts.find((context) => context.severity !== "high");
   const validAction = {
     contextId: highContext.id,
-    title: "复盘门店经营执行",
     ownerRole: "运营",
   };
   const responses: Array<[string, string | null]> = [
@@ -699,14 +691,17 @@ test("composer uses the same plan fallback for null, malformed, unbound, numeric
     ["malformed JSON", "not json"],
     ["unknown context", JSON.stringify({ verificationItems: [], actions: [{ ...validAction, contextId: "unknown-context" }] })],
     ["duplicate context", JSON.stringify({ verificationItems: [], actions: [validAction, validAction] })],
-    ["numeric action prose", JSON.stringify({ verificationItems: [], actions: [{ ...validAction, title: "提升销售二成" }] })],
-    ["asserted causality", JSON.stringify({
+    ["numeric fragment", JSON.stringify({
       verificationItems: [{
         contextId: highContext.id,
-        hypothesis: "排班不足导致经营承压",
-        requiredCheck: "核查门店经营记录",
+        topic: "排班2组",
+        checkFocus: "排班记录与履约明细",
       }],
       actions: [validAction],
+    })],
+    ["extra action prose", JSON.stringify({
+      verificationItems: [],
+      actions: [{ ...validAction, title: "复盘经营执行" }],
     })],
     ["missing high-risk context", JSON.stringify({
       verificationItems: [],
@@ -733,34 +728,32 @@ test("composer uses the same plan fallback for null, malformed, unbound, numeric
   );
 });
 
-test("composer rejects common asserted causal forms", async () => {
+test("composer rejects sentence-like, subject-bearing, causal, and remediation fragments", async () => {
   const highContext = comparePlan.actionContexts.find((context) => context.severity === "high");
   assert.ok(highContext);
   const expectedFallback = createGroundedInsightDraft(compareCatalog, comparePlan);
-  const assertedCausalForms = [
-    "排班不足导致经营承压",
-    "由于排班不足，经营表现承压",
-    "因为排班不足，经营表现承压",
-    "排班不足，因此经营表现承压",
-    "排班不足使得经营表现承压",
-    "经营表现受排班不足影响",
-    "Performance pressure is due to staffing gaps",
-    "Performance pressure is driven by staffing gaps",
-    "Performance pressure is caused by staffing gaps",
-    "Performance pressure results from staffing gaps",
+  const invalidFragments = [
+    "上海门店排班",
+    "排班调整",
+    "mitigate staffing gaps",
+    "排班不足致使经营承压",
+    "performance stems from staffing",
+    "可能涉及排班，但退款致使经营承压",
+    "排班记录，履约明细",
+    "staffing cadence service workflow refund review queue timing pattern",
+    "排班节奏".repeat(13),
   ];
 
-  for (const hypothesis of assertedCausalForms) {
+  for (const topic of invalidFragments) {
     const composer = createInsightComposer({
       model: new FakeAgentModel("deepseek", () => JSON.stringify({
         verificationItems: [{
           contextId: highContext.id,
-          hypothesis,
-          requiredCheck: "核查相关经营记录",
+          topic,
+          checkFocus: "排班记录与履约明细",
         }],
         actions: [{
           contextId: highContext.id,
-          title: "复盘经营执行",
           ownerRole: "运营",
         }],
       })),
@@ -769,43 +762,66 @@ test("composer rejects common asserted causal forms", async () => {
     assert.deepEqual(
       await composer.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog, plan: comparePlan }),
       expectedFallback,
-      hypothesis
+      topic
     );
   }
 });
 
-test("composer preserves genuinely tentative causal wording", async () => {
+test("composer accepts safe noun-phrase fragments and renders them tentatively", async () => {
   const highContext = comparePlan.actionContexts.find((context) => context.severity === "high");
   assert.ok(highContext);
-  const tentativeCausalForms = [
-    "可能由于排班不足而承压",
-    "需核查是否因为排班不足而承压",
-    "排班不足可能使得经营表现承压",
-    "需核查经营表现是否受排班不足影响",
-    "Performance may be due to staffing gaps",
-    "Verify whether performance is driven by staffing gaps",
-    "Staffing gaps might cause performance pressure",
-  ];
+  const context = comparePlan.actionContexts.find((item) => item.id === highContext.id);
+  assert.ok(context);
+  const composer = createInsightComposer({
+    model: new FakeAgentModel("deepseek", () => JSON.stringify({
+      verificationItems: [{
+        contextId: highContext.id,
+        topic: "排班与履约节奏",
+        checkFocus: "排班记录与履约明细",
+      }],
+      actions: [{
+        contextId: highContext.id,
+        ownerRole: "运营",
+      }],
+    })),
+  });
+  const result = await composer.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog, plan: comparePlan });
 
-  for (const hypothesis of tentativeCausalForms) {
-    const composer = createInsightComposer({
-      model: new FakeAgentModel("deepseek", () => JSON.stringify({
-        verificationItems: [{
-          contextId: highContext.id,
-          hypothesis,
-          requiredCheck: "核查相关经营记录",
-        }],
-        actions: [{
-          contextId: highContext.id,
-          title: "复盘经营执行",
-          ownerRole: "运营",
-        }],
-      })),
-    });
-    const result = await composer.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog, plan: comparePlan });
+  assert.equal(
+    result.verificationItems[0]?.hypothesis,
+    `${context.subjectLabel}可能与排班与履约节奏相关，需进一步验证`
+  );
+  assert.equal(
+    result.verificationItems[0]?.requiredCheck,
+    `核查${context.subjectLabel}相关的排班记录与履约明细`
+  );
+  assert.equal(result.actions[0]?.title, `核查并推进${context.subjectLabel}改善`);
+});
 
-    assert.equal(result.verificationItems[0]?.hypothesis.includes(hypothesis), true, hypothesis);
-  }
+test("server authors the complete verify-mode action command", async () => {
+  const catalog = buildInsightSourceCatalog({
+    intent: "channel_mix",
+    analysisData: fixtures.channel_mix,
+  });
+  const plan = buildInsightAttentionPlan({ intent: "channel_mix", catalog });
+  const context = plan.actionContexts[0];
+  assert.equal(context.mode, "verify");
+  const composer = createInsightComposer({
+    model: new FakeAgentModel("deepseek", () => JSON.stringify({
+      verificationItems: [{
+        contextId: context.id,
+        topic: "渠道结构",
+        checkFocus: "渠道明细与贡献记录",
+      }],
+      actions: [{
+        contextId: context.id,
+        ownerRole: "数据分析",
+      }],
+    })),
+  });
+
+  const result = await composer.compose({ question: "查看渠道结构", intent: "channel_mix", scope, catalog, plan });
+  assert.equal(result.actions[0]?.title, `核查${context.subjectLabel}并补充判断基准`);
 });
 
 const materializeInput = {
@@ -844,12 +860,11 @@ test("model-authored factual fields are ignored and never persisted", async () =
     verificationItems: [{
       contextId: comparePlan.actionContexts[0].id,
       observedFact: maliciousPhrase,
-      hypothesis: "Staffing may need review",
-      requiredCheck: "Review staffing records",
+      topic: "staffing cadence",
+      checkFocus: "staffing records",
     }],
     actions: [{
       contextId: comparePlan.actionContexts[0].id,
-      title: "Review store execution",
       ownerRole: "运营",
     }],
   };
