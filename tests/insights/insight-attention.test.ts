@@ -10,6 +10,8 @@ import {
   type InsightSourceCatalog,
 } from "../../src/modules/insights/insight-source-catalog";
 
+let activeMetricCatalog: InsightSourceCatalog;
+
 test("primary findings cover distinct subjects before support facts", () => {
   const selected = selectDiverseCandidates([
     candidate("metro-rate", "S004", "primary", 100),
@@ -72,6 +74,27 @@ test("minimum quota does not pad candidates when it is non-finite", () => {
   ], { maxFindings: 5, minFindings: Infinity });
 
   assert.deepEqual(selected.map((item) => item.sourceId), ["only"]);
+});
+
+test("summary strategies preserve business priority", () => {
+  const attribution = planFor("attribution", attributionCatalog([
+    ["orders", -30], ["aov", -20], ["channel", 10],
+  ]));
+  assert.deepEqual(attribution.findings.slice(0, 2).map(metricOfFinding), ["orders", "aov"]);
+
+  const report = planFor("report", reportCatalog({
+    overallRate: 94, worstStoreRate: 88, refundRate: 2.4, anomalyCount: 1,
+  }));
+  assert.deepEqual(report.findings.slice(0, 3).map(metricOfFinding), [
+    "achievement_rate", "store_achievement_rate", "refund_rate",
+  ]);
+
+  const custom = planFor("custom_metric", customCatalog(42));
+  assert.ok(custom.findings.every((item) => item.severity === "low"));
+
+  const noData = planFor("custom_metric", noDataCatalog());
+  assert.equal(noData.status, "no_data");
+  assert.equal(noData.findings[0].severity, "positive");
 });
 
 test("achievement strategy ranks actual underperformers independent of row order", () => {
@@ -680,6 +703,114 @@ function structureCatalog(
       })),
     },
   });
+}
+
+function planFor(
+  intent: "attribution" | "report" | "custom_metric",
+  catalog: InsightSourceCatalog
+) {
+  activeMetricCatalog = catalog;
+  return buildInsightAttentionPlan({ intent, catalog });
+}
+
+function attributionCatalog(
+  contributions: Array<[string, number]>
+): InsightSourceCatalog {
+  const totalGap = contributions.reduce((sum, [, value]) => sum + value, 0);
+  return buildInsightSourceCatalog({
+    intent: "attribution",
+    analysisData: {
+      salesSummary: {
+        totalSales: 960,
+        totalTarget: 1_000,
+        achievementRate: 96,
+        totalOrders: 100,
+        avgOrderValue: 9.6,
+      },
+      decomposition: {
+        totalGap,
+        orderVolumeGap: 0,
+        aovGap: 0,
+        interaction: 0,
+      },
+      factorContributions: contributions.map(([factor, contribution]) => ({
+        factor,
+        label: factor,
+        contribution,
+      })),
+    },
+  });
+}
+
+function reportCatalog(input: {
+  overallRate: number;
+  worstStoreRate: number;
+  refundRate: number;
+  anomalyCount: number;
+}): InsightSourceCatalog {
+  return buildInsightSourceCatalog({
+    intent: "report",
+    analysisData: {
+      summary: {
+        storeCount: 1,
+        totalSales: 940,
+        totalTarget: 1_000,
+        achievementRate: input.overallRate,
+        totalRefund: 24,
+        refundRate: input.refundRate,
+        totalOrders: 100,
+        avgAOV: 9.4,
+        totalCancelled: 0,
+        totalPromo: 0,
+        promoRate: 0,
+      },
+      storeRanking: [{
+        storeId: "S001",
+        storeName: "重点门店",
+        totalSales: input.worstStoreRate,
+        totalTarget: 100,
+        achievementRate: input.worstStoreRate,
+        salesRank: 1,
+      }],
+      dailyTrend: [{
+        date: "2025-05-01",
+        sales: 80,
+        target: 100,
+        orders: 10,
+        avgAOV: 8,
+        salesRankDesc: 1,
+        salesRankAsc: 1,
+        isAnomaly: input.anomalyCount,
+        weekendAvg: 80,
+        weekdayAvg: 80,
+        weekendVs: 0,
+      }],
+    },
+  });
+}
+
+function customCatalog(value: number): InsightSourceCatalog {
+  return buildInsightSourceCatalog({
+    intent: "custom_metric",
+    analysisData: { metric_value: value },
+  });
+}
+
+function noDataCatalog(): InsightSourceCatalog {
+  return buildInsightSourceCatalog({
+    intent: "custom_metric",
+    analysisData: { recordCount: 0 },
+  });
+}
+
+function metricOfFinding(finding: { sourceId: string }): string {
+  const source = activeMetricCatalog.findingSources.find((item) => item.id === finding.sourceId);
+  assert.ok(source, `missing source ${finding.sourceId}`);
+  if (source.metricCode === "factor_contribution") return source.subjectIds[0] || source.metricCode;
+  if (source.metricCode === "achievement_rate" && source.attention.subjectKey !== "scope") {
+    return "store_achievement_rate";
+  }
+  return source.metricCode;
 }
 
 function subjectOfFinding(catalog: InsightSourceCatalog, sourceId: string): string {
