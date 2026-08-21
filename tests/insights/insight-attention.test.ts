@@ -236,6 +236,73 @@ test("compare includes cross-store verification signals without making an at-tar
   assert.ok(plan.findings.slice(1).every((finding) => finding.severity === "low"));
 });
 
+test("refund strategy prioritizes high rates, then above-range rates, independent of input order", () => {
+  const catalog = refundCatalog({
+    overall: 1.2,
+    stores: [
+      ["S005", "社区中心店", 1.8],
+      ["S001", "上海商场店", 0.8],
+      ["S004", "地铁站店", 2.4],
+    ],
+  });
+
+  const plan = buildInsightAttentionPlan({ intent: "refund_rate", catalog });
+
+  assert.equal(plan.status, "risk");
+  assert.deepEqual(
+    plan.findings.slice(0, 2).map((finding) => ({
+      subject: subjectOfFinding(catalog, finding.sourceId),
+      severity: finding.severity,
+    })),
+    [
+      { subject: "S004", severity: "high" },
+      { subject: "S005", severity: "medium" },
+    ]
+  );
+});
+
+test("anomaly strategy sorts equal counts by absolute z-score before the stable subject key", () => {
+  const catalog = anomalyCatalog([
+    ["S005", "社区中心店", 2, 1.5],
+    ["S001", "上海商场店", 2, 3.5],
+    ["S004", "地铁站店", 1, 9],
+  ]);
+
+  const plan = buildInsightAttentionPlan({ intent: "anomaly_detection", catalog });
+
+  assert.deepEqual(
+    plan.findings.map((finding) => ({
+      subject: subjectOfFinding(catalog, finding.sourceId),
+      severity: finding.severity,
+    })),
+    [
+      { subject: "S001", severity: "high" },
+      { subject: "S005", severity: "high" },
+      { subject: "S004", severity: "medium" },
+    ]
+  );
+});
+
+test("healthy refund and structure plans stay neutral and use benchmark-verification actions", () => {
+  const healthyRefund = buildInsightAttentionPlan({
+    intent: "refund_rate",
+    catalog: refundCatalog({ overall: 1.2, stores: [["S001", "上海商场店", 0.8]] }),
+  });
+  assert.equal(healthyRefund.status, "healthy");
+  assert.ok(healthyRefund.findings.every((finding) => finding.severity === "positive" || finding.severity === "low"));
+
+  for (const intent of ["channel_mix", "daypart_analysis", "promotion_contribution"] as const) {
+    const catalog = structureCatalog(intent);
+    const plan = buildInsightAttentionPlan({ intent, catalog });
+
+    assert.equal(plan.status, "healthy");
+    assert.ok(plan.findings.length > 0);
+    assert.ok(plan.findings.every((finding) => finding.severity === "low" || finding.severity === "positive"));
+    assert.ok(plan.findings.every((finding) => finding.confidence === "needs_verification"));
+    assert.ok(plan.actionContexts.every((context) => context.mode === "verify"));
+  }
+});
+
 for (const scenario of [
   {
     name: "target-gap percentage before refund rate",
@@ -395,6 +462,86 @@ function compareCatalog(stores: Record<string, unknown>[]): InsightSourceCatalog
   return buildInsightSourceCatalog({
     intent: "compare",
     analysisData: { stores },
+  });
+}
+
+function refundCatalog(input: {
+  overall: number;
+  stores: Array<[string, string, number]>;
+}): InsightSourceCatalog {
+  return buildInsightSourceCatalog({
+    intent: "refund_rate",
+    analysisData: {
+      refundRate: input.overall,
+      cancelRate: 0,
+      dailyRefund: [],
+      byStore: input.stores.map(([storeId, storeName, refundRate]) => ({
+        storeId,
+        storeName,
+        refundRate,
+        cancelRate: 0,
+      })),
+    },
+  });
+}
+
+function anomalyCatalog(
+  stores: Array<[string, string, number, number]>
+): InsightSourceCatalog {
+  return buildInsightSourceCatalog({
+    intent: "anomaly_detection",
+    analysisData: {
+      stores: stores.map(([storeId, storeName, anomalyCount, zScore]) => ({
+        storeId,
+        storeName,
+        anomalyCount,
+        anomalyDays: [{
+          date: "2025-05-01",
+          actualSales: 80,
+          salesTarget: 100,
+          zScore,
+        }],
+      })),
+    },
+  });
+}
+
+function structureCatalog(
+  intent: "channel_mix" | "daypart_analysis" | "promotion_contribution"
+): InsightSourceCatalog {
+  if (intent === "promotion_contribution") {
+    return buildInsightSourceCatalog({
+      intent,
+      analysisData: {
+        contributionRate: 35,
+        totalDiscount: 500,
+        promotionDetails: [{ promotionName: "会员券", discountAmount: 300 }],
+        byStore: [{
+          storeId: "S001",
+          storeName: "上海商场店",
+          contributionRate: 40,
+          totalDiscount: 250,
+        }],
+      },
+    });
+  }
+
+  const dimension = intent === "channel_mix" ? "channel" : "daypart";
+  const overallKey = intent === "channel_mix" ? "channelPct" : "daypartPct";
+  const storeKey = intent === "channel_mix" ? "channels" : "dayparts";
+  return buildInsightSourceCatalog({
+    intent,
+    analysisData: {
+      [overallKey]: [
+        { [dimension]: "线上", salesPct: 65 },
+        { [dimension]: "线下", salesPct: 35 },
+      ],
+      byStore: [{
+        storeId: "S001",
+        storeName: "上海商场店",
+        [storeKey]: [{ [dimension]: "线上", sales: 650 }],
+      }],
+    },
   });
 }
 

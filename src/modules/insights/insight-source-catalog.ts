@@ -662,9 +662,9 @@ function buildAnomaly(builder: CatalogBuilder, data: UnknownRecord): void {
       return date ? [{ day, date }] : [];
     });
     const dates = builder.evidence(`stores.${subject.id}.anomalyDays`, "anomaly_dates", `${subject.label}异常日期`, "currency", "当日销售目标", days.map(({ day, date }) => series(date, day.actualSales, day.salesTarget)));
-    builder.evidence(`stores.${subject.id}.anomalyDrivers`, "metric_drivers", `${subject.label}异常驱动`, "ratio", "标准分", days.map(({ day, date }) => series(date, day.zScore)));
+    const drivers = builder.evidence(`stores.${subject.id}.anomalyDrivers`, "metric_drivers", `${subject.label}异常驱动`, "ratio", "标准分", days.map(({ day, date }) => series(date, day.zScore)));
     const count = builder.evidence(`stores.${subject.id}.anomalyCount`, "metric_drivers", `${subject.label}异常日数量`, "count", "异常日数量", [series("异常日数量", store.anomalyCount)]);
-    builder.source("stores.anomalyCount", "anomaly_count", `${subject.label}异常日数量`, store.anomalyCount, "count", [subject.id], [count], attentionMetadata(subject.id, "primary", "anomaly", 0, numberValue(store.anomalyCount) ?? undefined));
+    builder.source("stores.anomalyCount", "anomaly_count", `${subject.label}异常日数量`, store.anomalyCount, "count", [subject.id], [count, drivers], attentionMetadata(subject.id, "primary", "anomaly", 0, numberValue(store.anomalyCount) ?? undefined));
     for (const { day, date } of days) builder.source("stores.anomalyDays.actualSales", "anomaly_day", `${subject.label}${date}销售额`, day.actualSales, "currency", [subject.id, date], [dates], attentionMetadata(subject.id, "support", "anomaly", numberValue(day.salesTarget) ?? undefined, numberValue(day.actualSales) === null || numberValue(day.salesTarget) === null ? undefined : numberValue(day.actualSales)! - numberValue(day.salesTarget)!));
   }
 }

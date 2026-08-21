@@ -5,11 +5,15 @@ import {
   performanceAttentionStrategies,
   type InsightAttentionStrategy,
 } from "./insight-performance-strategies";
+import { riskStructureAttentionStrategies } from "./insight-risk-structure-strategies";
 import type { InsightSourceCatalog } from "./insight-source-catalog";
 
 export const insightAttentionStrategies: Partial<
   Record<AnalysisIntent, InsightAttentionStrategy>
-> = { ...performanceAttentionStrategies };
+> = {
+  ...performanceAttentionStrategies,
+  ...riskStructureAttentionStrategies,
+};
 
 export function buildInsightAttentionPlan(input: {
   intent: AnalysisIntent;
