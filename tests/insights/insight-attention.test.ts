@@ -5,6 +5,7 @@ import {
   type InsightAttentionCandidate,
 } from "../../src/modules/insights/insight-attention-plan";
 import { buildInsightAttentionPlan } from "../../src/modules/insights/insight-attention-registry";
+import { InsightValidationError } from "../../src/modules/insights/insight-validator";
 import {
   buildInsightSourceCatalog,
   type InsightSourceCatalog,
@@ -95,6 +96,43 @@ test("summary strategies preserve business priority", () => {
   const noData = planFor("custom_metric", noDataCatalog());
   assert.equal(noData.status, "no_data");
   assert.equal(noData.findings[0].severity, "positive");
+});
+
+test("attribution retains same-scope negative decomposition drivers as deterministic support facts", () => {
+  const catalog = sameScopeAttributionCatalog();
+  const plan = buildInsightAttentionPlan({ intent: "attribution", catalog });
+
+  assert.deepEqual(
+    plan.findings.map((finding) => {
+      const source = sourceOfFinding(catalog, finding.sourceId);
+      return [source.label, finding.severity];
+    }),
+    [["订单量差异", "high"], ["客单价差异", "medium"]]
+  );
+  assert.deepEqual(plan.actionContexts.map((context) => context.sourceId), [plan.findings[0]?.sourceId]);
+});
+
+test("report no-data catalog keeps its positive availability finding and monitor action", () => {
+  const catalog = reportNoDataCatalog();
+  const plan = buildInsightAttentionPlan({ intent: "report", catalog });
+
+  assert.equal(plan.status, "no_data");
+  assert.deepEqual(plan.findings.map((finding) => ({
+    metricCode: sourceOfFinding(catalog, finding.sourceId).metricCode,
+    severity: finding.severity,
+  })), [{ metricCode: "data_availability", severity: "positive" }]);
+  assert.deepEqual(plan.actionContexts.map((context) => ({
+    severity: context.severity,
+    mode: context.mode,
+    verificationMetricCode: context.verificationMetricCode,
+  })), [{ severity: "positive", mode: "monitor", verificationMetricCode: "data_availability" }]);
+});
+
+test("irrelevant intent rejects before the exhaustive strategy registry lookup", () => {
+  assert.throws(
+    () => buildInsightAttentionPlan({ intent: "irrelevant", catalog: customCatalog(42) }),
+    (error: unknown) => error instanceof InsightValidationError && error.code === "INSUFFICIENT_SOURCE_DATA"
+  );
 });
 
 test("achievement strategy ranks actual underperformers independent of row order", () => {
@@ -742,6 +780,27 @@ function attributionCatalog(
   });
 }
 
+function sameScopeAttributionCatalog(): InsightSourceCatalog {
+  return buildInsightSourceCatalog({
+    intent: "attribution",
+    analysisData: {
+      salesSummary: {
+        totalSales: 800,
+        totalTarget: 1_000,
+        achievementRate: 80,
+        totalOrders: 80,
+        avgOrderValue: 10,
+      },
+      decomposition: {
+        totalGap: -200,
+        orderVolumeGap: -120,
+        aovGap: -80,
+        interaction: 0,
+      },
+    },
+  });
+}
+
 function reportCatalog(input: {
   overallRate: number;
   worstStoreRate: number;
@@ -786,6 +845,13 @@ function reportCatalog(input: {
         weekendVs: 0,
       }],
     },
+  });
+}
+
+function reportNoDataCatalog(): InsightSourceCatalog {
+  return buildInsightSourceCatalog({
+    intent: "report",
+    analysisData: { recordCount: 0 },
   });
 }
 

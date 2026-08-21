@@ -29,12 +29,13 @@ function buildAttributionPlan(catalog: InsightSourceCatalog): InsightAttentionPl
     : [];
 
   if (negativeDrivers.length > 0) {
+    const largestNegativeDriver = largestMagnitude(negativeDrivers);
     const selected = selectDiverseCandidates([
       ...negativeDrivers.map((source) => candidate(
         source,
-        source === largestMagnitude(negativeDrivers) ? "high" : "medium",
+        source === largestNegativeDriver ? "high" : "medium",
         Math.abs(source.value),
-        "primary"
+        source === largestNegativeDriver ? "primary" : "support"
       )),
       ...drivers
         .filter((source) => source.value > 0)
@@ -52,6 +53,18 @@ function buildAttributionPlan(catalog: InsightSourceCatalog): InsightAttentionPl
 }
 
 function buildReportPlan(catalog: InsightSourceCatalog): InsightAttentionPlan {
+  const noData = catalog.findingSources.find((source) => {
+    return source.metricCode === "data_availability" && source.value === 0;
+  });
+  if (noData) {
+    return planFromCandidates(
+      catalog,
+      [candidate(noData, "positive", 1, "primary")],
+      "no_data",
+      "monitor"
+    );
+  }
+
   const candidates: InsightAttentionCandidate[] = [];
   const overallRate = catalog.findingSources.find((source) => {
     return source.metricCode === "achievement_rate" && source.attention.subjectKey === "scope";
