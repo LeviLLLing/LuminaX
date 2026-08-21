@@ -12,6 +12,7 @@ import {
   createGroundedInsightDraft,
   type InsightComposer,
 } from "./insight-composer";
+import { buildInsightAttentionPlan } from "./insight-attention-registry";
 import {
   buildInsightSourceCatalog,
   type InsightSourceCatalog,
@@ -120,11 +121,16 @@ export function createInsightApplication({
         intent: analysis.intent,
         analysisData: analysis.analysisData,
       });
+      const plan = buildInsightAttentionPlan({
+        intent: analysis.intent,
+        catalog,
+      });
       const draft = await composer.compose({
         question: analysis.question,
         intent: analysis.intent,
         scope,
         catalog,
+        plan,
         attributionNarrative: analysis.attributionNarrative,
       });
       let snapshot: InsightSnapshot;
@@ -146,7 +152,7 @@ export function createInsightApplication({
           intent: analysis.intent,
           scope,
           catalog,
-          draft: createGroundedInsightDraft(catalog),
+          draft: createGroundedInsightDraft(catalog, plan),
           accessRequirements: analysis.accessRequirements,
         });
       }

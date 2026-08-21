@@ -32,13 +32,13 @@
 - `metrics`: `SqlMetricQueryExecutor` is implemented by `MySqlSqlMetricQueryExecutor`; SQL contracts reside in `src/modules/metrics/sql/mysql-metric-queries.ts`.
 - `data-source`: `SalesDataSource.loadSalesData` has JSON, MySQL, and SQL Server implementations selected by `createSalesDataSource` in `src/modules/data-source/data-source-factory.ts`.
 - `reports`: `WeeklyReportData` is the stable report model. `generateWeeklyReportHTML` and `generateWeeklyReportSummary` are exported from `src/modules/reports/report-engine.ts`; `formatSqlWeeklyReport` renders SQL-backed report results for chat.
-- `insights`: `InsightApplication` composes and validates a projection of an authorized SQL result. `InsightComposer` uses `DEEPSEEK_INSIGHT_MODEL || DEEPSEEK_MODEL || deepseek-v4-flash` only to select controlled fact IDs and draft hypotheses or actions; it has no memory, database access, metric-calculation, or persisted-fact-authoring responsibility.
+- `insights`: `InsightApplication` builds a deterministic attention plan from an authorized SQL result before composition. `InsightComposer` uses `DEEPSEEK_INSIGHT_MODEL || DEEPSEEK_MODEL || deepseek-v4-flash` only to draft context-bound hypotheses or actions; it cannot select findings and has no memory, database access, metric-calculation, or persisted-fact-authoring responsibility.
 
 ## Insight Projection Flow
 1. The Business Agent invokes `onAnalysisPlanned` after intent normalization and before SQL execution. Triggerable analyses persist the user's generation token at this point, so older work cannot commit while a newer request is calculating.
 2. The Business Agent invokes `onAnalysisReady` with the authorized scope, fixed-SQL result and any single attribution explanation.
 3. `InsightSourceCatalog` and `EvidenceBuilder` build deterministic, traceable sources and evidence from the structured result.
-4. `InsightComposer` selects allowed source and evidence IDs, prioritizes them, and drafts only hypotheses, checks and actions. It does not author formal facts.
+4. The attention strategy locks source and evidence IDs before `InsightComposer` drafts hypotheses, checks and actions against deterministic context IDs. The composer cannot select, replace, or reprioritize findings.
 5. `InsightValidator` verifies schema, references, quantities, units and access requirements, then generates the headline, finding copy and observed facts from the selected SQL-backed catalog entries.
 6. `LatestInsightRepository` commits only when the supplied request token exactly matches the persisted per-user generation token. The default `.luminax/latest-insights.json` implementation uses atomic rename and a process-wide queue shared by all local repository instances. It is a single-process POC store; multi-process deployment requires a MySQL compare-and-swap implementation behind the same contract.
 7. `GET /api/insights/latest` returns the reauthorized public DTO. `PATCH /api/insights/latest/actions/:actionId` reauthorizes the same exact table, column and store requirements and uses `insightId` for optimistic concurrency.

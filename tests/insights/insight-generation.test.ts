@@ -13,6 +13,7 @@ import {
   createGroundedInsightDraft,
   createInsightComposer,
 } from "../../src/modules/insights/insight-composer";
+import { buildInsightAttentionPlan } from "../../src/modules/insights/insight-attention-registry";
 import {
   containsNumericClaim,
   InsightValidationError,
@@ -529,6 +530,7 @@ test("evidence values are copied from SQL data and never from the draft", () => 
 });
 
 const compareCatalog = buildInsightSourceCatalog({ intent: "compare", analysisData: fixtures.compare });
+const comparePlan = buildInsightAttentionPlan({ intent: "compare", catalog: compareCatalog });
 const sourceIds = compareCatalog.findingSources.slice(0, 3).map((item) => item.id);
 const validDraft: InsightDraft = {
   findings: sourceIds.map((sourceId, index) => ({ sourceId, severity: index === 2 ? "medium" : "high", confidence: "high", evidenceIds: [compareCatalog.findingSources[index].evidenceCandidateIds[0]] })),
@@ -539,31 +541,109 @@ const validDraft: InsightDraft = {
   ],
 };
 
-test("composer has no memory and returns only a bounded draft", async () => {
-  const model = new FakeAgentModel("deepseek", () => JSON.stringify(validDraft));
+test("composer locks findings before DeepSeek and maps model prose through action contexts", async () => {
+  const priorityCatalog = buildInsightSourceCatalog({
+    intent: "achievement_rate",
+    analysisData: achievementFixture([
+      achievementStore("S001", "上海商场店", 102),
+      achievementStore("S004", "地铁站店", 82),
+      achievementStore("S005", "社区中心店", 94),
+    ]),
+  });
+  const plan = buildInsightAttentionPlan({ intent: "achievement_rate", catalog: priorityCatalog });
+  const contexts = plan.actionContexts.slice(0, 3);
+  const shanghaiSource = priorityCatalog.findingSources.find((source) => source.subjectIds.includes("S001"));
+  assert.ok(shanghaiSource);
+  assert.deepEqual(
+    contexts.map((context) => context.subjectLabel),
+    ["地铁站店目标达成率", "社区中心店目标达成率"]
+  );
+  const modelDraft = {
+    findings: [{
+      sourceId: shanghaiSource.id,
+      severity: "high",
+      confidence: "high",
+      evidenceIds: shanghaiSource.evidenceCandidateIds,
+    }],
+    verificationItems: contexts.map((context) => ({
+      contextId: context.id,
+      hypothesis: "可能存在执行偏差",
+      requiredCheck: "核查门店经营记录",
+    })),
+    actions: contexts.map((context) => ({
+      contextId: context.id,
+      title: "复盘门店经营执行",
+      ownerRole: "运营",
+    })),
+  };
+  const model = new FakeAgentModel("deepseek", () => JSON.stringify(modelDraft));
   const composer = createInsightComposer({ model });
-  const result = await composer.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog, attributionNarrative: "订单贡献偏弱" });
-  assert.equal(result.findings.length, 3);
+  const result = await composer.compose({ question: "查看目标达成", intent: "achievement_rate", scope, catalog: priorityCatalog, plan, attributionNarrative: "订单贡献偏弱" });
+
+  assert.deepEqual(result.findings, plan.findings);
+  assert.equal(result.findings.some((finding) => finding.sourceId === shanghaiSource.id), false);
+  assert.deepEqual(
+    result.actions.map(({ priority, verificationMetricCode }) => ({ priority, verificationMetricCode })),
+    contexts.map((context) => ({
+      priority: context.severity === "high" ? "P0" : context.severity === "medium" ? "P1" : "P2",
+      verificationMetricCode: context.verificationMetricCode,
+    }))
+  );
   assert.equal(model.requests.length, 1);
   assert.equal(model.requests[0].temperature, 0.1);
   assert.equal(model.requests[0].messages.length, 1);
   assert.match(model.requests[0].messages[0].content, /订单贡献偏弱/);
+  assert.match(model.requests[0].messages[0].content, /lockedFindings/);
+  assert.match(model.requests[0].messages[0].content, /actionContexts/);
   assert.doesNotMatch(model.requests[0].messages[0].content, /select\s|password|credential/i);
 });
 
-test("composer falls back to grounded findings when model output is invalid", async () => {
-  const invalidJson = createInsightComposer({ model: new FakeAgentModel("deepseek", () => "not json") });
-  const fallback = await invalidJson.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog });
-  assert.deepEqual(fallback.findings.map((finding) => finding.sourceId), sourceIds);
+test("composer uses the same plan fallback for null, malformed, unbound, numeric, and incomplete model drafts", async () => {
+  const highContext = comparePlan.actionContexts.find((context) => context.severity === "high");
+  assert.ok(highContext);
+  const nonHighContext = comparePlan.actionContexts.find((context) => context.severity !== "high");
+  const validAction = {
+    contextId: highContext.id,
+    title: "复盘门店经营执行",
+    ownerRole: "运营",
+  };
+  const responses: Array<[string, string | null]> = [
+    ["null", null],
+    ["malformed JSON", "not json"],
+    ["unknown context", JSON.stringify({ verificationItems: [], actions: [{ ...validAction, contextId: "unknown-context" }] })],
+    ["duplicate context", JSON.stringify({ verificationItems: [], actions: [validAction, validAction] })],
+    ["numeric action prose", JSON.stringify({ verificationItems: [], actions: [{ ...validAction, title: "提升销售二成" }] })],
+    ["asserted causality", JSON.stringify({
+      verificationItems: [{
+        contextId: highContext.id,
+        hypothesis: "排班不足导致经营承压",
+        requiredCheck: "核查门店经营记录",
+      }],
+      actions: [validAction],
+    })],
+    ["missing high-risk context", JSON.stringify({
+      verificationItems: [],
+      actions: nonHighContext ? [{ ...validAction, contextId: nonHighContext.id }] : [],
+    })],
+  ];
+  const expectedFallback = createGroundedInsightDraft(compareCatalog, comparePlan);
+
+  for (const [name, response] of responses) {
+    const composer = createInsightComposer({ model: new FakeAgentModel("deepseek", () => response) });
+    const actual = await composer.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog, plan: comparePlan });
+    assert.deepEqual(actual, expectedFallback, name);
+    assert.deepEqual(actual.findings, comparePlan.findings, name);
+  }
+
+  const failedModel = createInsightComposer({
+    model: new FakeAgentModel("deepseek", () => {
+      throw new Error("model unavailable");
+    }),
+  });
   assert.deepEqual(
-    fallback.findings.map((finding) => finding.evidenceIds),
-    compareCatalog.findingSources.slice(0, 3).map((source) => [source.evidenceCandidateIds[0]])
+    await failedModel.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog, plan: comparePlan }),
+    expectedFallback
   );
-  assert.equal(fallback.verificationItems.length, 2);
-  assert.equal(fallback.actions.length, 2);
-  const tooShort = createInsightComposer({ model: new FakeAgentModel("deepseek", () => JSON.stringify({ ...validDraft, findings: validDraft.findings.slice(0, 2) })) });
-  const recovered = await tooShort.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog });
-  assert.deepEqual(recovered.findings.map((finding) => finding.sourceId), sourceIds);
 });
 
 const materializeInput = {
@@ -598,22 +678,21 @@ test("model-authored numeric claims and unknown IDs reject the snapshot", () => 
 test("model-authored factual fields are ignored and never persisted", async () => {
   const maliciousPhrase = "Understaffing caused sales pressure";
   const modelDraft = {
-    ...validDraft,
     headline: maliciousPhrase,
-    findings: validDraft.findings.map((finding) => ({
-      ...finding,
-      title: maliciousPhrase,
-      summary: maliciousPhrase,
-    })),
     verificationItems: [{
-      sourceId: sourceIds[0],
+      contextId: comparePlan.actionContexts[0].id,
       observedFact: maliciousPhrase,
       hypothesis: "Staffing may need review",
       requiredCheck: "Review staffing records",
     }],
+    actions: [{
+      contextId: comparePlan.actionContexts[0].id,
+      title: "Review store execution",
+      ownerRole: "运营",
+    }],
   };
   const composer = createInsightComposer({ model: new FakeAgentModel("deepseek", () => JSON.stringify(modelDraft)) });
-  const draft = await composer.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog });
+  const draft = await composer.compose({ question: "比较门店", intent: "compare", scope, catalog: compareCatalog, plan: comparePlan });
 
   const snapshot = materializeInsightSnapshot({ ...materializeInput, draft });
   const persistedFacts = JSON.stringify({
@@ -621,9 +700,11 @@ test("model-authored factual fields are ignored and never persisted", async () =
     findings: snapshot.findings.map(({ title, summary }) => ({ title, summary })),
     observedFacts: snapshot.verificationItems.map((item) => item.observedFact),
   });
+  const lockedSource = compareCatalog.findingSources.find((source) => source.id === comparePlan.findings[0].sourceId);
+  assert.ok(lockedSource);
   assert.doesNotMatch(persistedFacts, new RegExp(maliciousPhrase, "i"));
-  assert.equal(snapshot.findings[0].title, compareCatalog.findingSources[0].label);
-  assert.match(snapshot.verificationItems[0].observedFact, new RegExp(compareCatalog.findingSources[0].label));
+  assert.equal(snapshot.findings[0].title, lockedSource.label);
+  assert.match(snapshot.verificationItems[0].observedFact, new RegExp(lockedSource.label));
 });
 
 test("empty evidence, unsupported numeric prose, and bad reference cardinality reject", () => {
@@ -748,7 +829,8 @@ test("a single-value custom metric produces a neutral, verifiable insight", () =
       },
     },
   });
-  const draft = createGroundedInsightDraft(catalog);
+  const plan = buildInsightAttentionPlan({ intent: "custom_metric", catalog });
+  const draft = createGroundedInsightDraft(catalog, plan);
   const snapshot = materializeInsightSnapshot({
     userId: "user-1",
     question: "查询自定义销售额",
@@ -760,10 +842,37 @@ test("a single-value custom metric produces a neutral, verifiable insight", () =
   });
 
   assert.equal(snapshot.findings.length, 1);
-  assert.equal(snapshot.findings[0].severity, "positive");
+  assert.equal(snapshot.findings[0].severity, "low");
   assert.equal(snapshot.actions.length, 1);
   assert.equal(snapshot.actions[0].verificationMetricCode, "custom_metric_value");
-  assert.equal(snapshot.headline, "指标值已更新，可持续跟踪");
+  assert.equal(snapshot.headline, "当前范围暂无重点风险，可持续监测");
+});
+
+test("risk headline follows the first deterministic attention finding", () => {
+  const catalog = buildInsightSourceCatalog({
+    intent: "achievement_rate",
+    analysisData: achievementFixture([
+      achievementStore("S001", "上海商场店", 102),
+      achievementStore("S004", "地铁站店", 82),
+      achievementStore("S005", "社区中心店", 94),
+    ]),
+  });
+  const plan = buildInsightAttentionPlan({ intent: "achievement_rate", catalog });
+  const draft = createGroundedInsightDraft(catalog, plan);
+  const snapshot = materializeInsightSnapshot({
+    userId: "user-1",
+    question: "查看目标达成",
+    intent: "achievement_rate",
+    scope,
+    catalog,
+    draft,
+    accessRequirements: [],
+  });
+  const firstSource = catalog.findingSources.find((source) => source.id === plan.findings[0].sourceId);
+
+  assert.ok(firstSource);
+  assert.equal(snapshot.headline.startsWith(firstSource.label), true);
+  assert.equal(snapshot.findings.some((finding) => finding.subjectIds.includes("S001") && finding.severity !== "positive"), false);
 });
 
 test("an empty successful SQL result becomes a neutral data-availability insight", () => {
@@ -771,7 +880,8 @@ test("an empty successful SQL result becomes a neutral data-availability insight
     intent: "report",
     analysisData: { recordCount: 0 },
   });
-  const draft = createGroundedInsightDraft(catalog);
+  const plan = buildInsightAttentionPlan({ intent: "report", catalog });
+  const draft = createGroundedInsightDraft(catalog, plan);
   const snapshot = materializeInsightSnapshot({
     userId: "user-1",
     question: "生成经营周报",

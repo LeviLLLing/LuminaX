@@ -143,8 +143,8 @@ function buildDeterministicHeadline(
   ) {
     return "当前范围暂无可用经营数据，洞察已更新";
   }
-  if (findings.every((finding) => finding.severity === "positive")) {
-    return `${findings[0].title}已更新，可持续跟踪`;
+  if (findings.every((finding) => finding.severity === "low" || finding.severity === "positive")) {
+    return "当前范围暂无重点风险，可持续监测";
   }
   return `${findings[0].title}等关键经营信号需要关注`;
 }

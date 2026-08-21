@@ -127,6 +127,19 @@ export interface InsightDraft {
   }>;
 }
 
+export interface InsightModelDraft {
+  verificationItems: Array<{
+    contextId: string;
+    hypothesis: string;
+    requiredCheck: string;
+  }>;
+  actions: Array<{
+    contextId: string;
+    title: string;
+    ownerRole: InsightOwnerRole;
+  }>;
+}
+
 export function toInsightSnapshotDto(snapshot: InsightSnapshot): InsightSnapshotDto {
   const { userId: _userId, accessRequirements: _accessRequirements, sourceFingerprint: _sourceFingerprint, ...clientFields } = snapshot;
   return structuredClone(clientFields);

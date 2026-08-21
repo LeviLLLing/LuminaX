@@ -7,7 +7,12 @@ import {
   buildInsightReceipt,
   createInsightApplication,
 } from "../../src/modules/insights/insight-application";
-import type { InsightComposer } from "../../src/modules/insights/insight-composer";
+import {
+  createGroundedInsightDraft,
+  type InsightComposer,
+} from "../../src/modules/insights/insight-composer";
+import { buildInsightAttentionPlan } from "../../src/modules/insights/insight-attention-registry";
+import type { InsightAttentionPlan } from "../../src/modules/insights/insight-attention-plan";
 import type { InsightSourceCatalog } from "../../src/modules/insights/insight-source-catalog";
 import type { InsightSnapshot } from "../../src/modules/insights/insight-types";
 import type { LatestInsightRepository } from "../../src/modules/insights/latest-insight-repository";
@@ -32,11 +37,18 @@ const analysis: BusinessAnalysisContext = {
 
 test("successful generation saves before returning and produces a short receipt", async () => {
   const order: string[] = [];
+  let receivedPlan: InsightAttentionPlan | undefined;
   const repository = createRepository(order);
   const application = createInsightApplication({
     repository,
     guard: new InsightGenerationGuard(),
-    composer: createComposer(order),
+    composer: {
+      async compose(input) {
+        order.push("compose");
+        receivedPlan = input.plan;
+        return createGroundedInsightDraft(input.catalog, input.plan);
+      },
+    },
     buildCatalog: () => catalog,
     accessControl: createAllowingAccessControl(order),
     listStoreIds: async () => ["S001", "S002"],
@@ -48,9 +60,10 @@ test("successful generation saves before returning and produces a short receipt"
   );
 
   assert.deepEqual(order, ["compose", "save"]);
+  assert.deepEqual(receivedPlan, buildInsightAttentionPlan({ intent: analysis.intent, catalog }));
   assert.equal(snapshot.userId, "u1");
   const receipt = buildInsightReceipt(snapshot);
-  assert.match(receipt, /3 项发现/);
+  assert.match(receipt, /2 项发现/);
   assert.match(receipt, /2 项行动/);
   assert.doesNotMatch(receipt, /门店差异值得跟进/);
 });
@@ -97,11 +110,11 @@ test("semantic model draft errors fall back to a grounded insight", async () => 
     analysis
   );
 
-  assert.equal(snapshot.findings.length, 3);
+  assert.equal(snapshot.findings.length, 2);
   assert.equal(snapshot.actions.length, 2);
   assert.deepEqual(
     snapshot.actions.map((action) => action.verificationMetricCode),
-    ["sales", "sales"]
+    ["achievement_rate", "achievement_rate"]
   );
 });
 
@@ -379,41 +392,34 @@ test("updateAction authorizes before mutating the authenticated user's snapshot"
 });
 
 const catalog: InsightSourceCatalog = {
-  findingSources: [1, 2, 3].map((value) => ({
+  findingSources: [85, 95, 105].map((value, index) => ({
     id: `source-${value}`,
-    metricCode: "sales",
+    metricCode: "achievement_rate",
     label: `来源${value}`,
     value,
-    unit: "count",
-    displayValue: String(value),
-    subjectIds: ["S001"],
+    unit: "percent",
+    displayValue: `${value}%`,
+    subjectIds: [`S00${index + 1}`],
     evidenceCandidateIds: [`evidence-${value}`],
-    attention: { subjectKey: "S001", role: "primary", signal: "neutral" },
+    attention: { subjectKey: `S00${index + 1}`, role: "primary", signal: "achievement", benchmark: 100, delta: value - 100 },
   })),
-  evidenceCandidates: [1, 2, 3].map((value) => ({
+  evidenceCandidates: [85, 95, 105].map((value) => ({
     id: `evidence-${value}`,
     type: "metric_drivers" as const,
     title: `证据${value}`,
-    unit: "count",
-    baselineLabel: "数量",
+    unit: "percent",
+    baselineLabel: "目标达成率",
     series: [{ key: `k-${value}`, label: `来源${value}`, value, direction: "positive" as const }],
     interpretationFacts: [`来源${value}为${value}`],
   })),
-  verificationMetricLabels: { sales: "销售额" },
+  verificationMetricLabels: { achievement_rate: "目标达成率" },
 };
 
 function createComposer(order: string[]): InsightComposer {
   return {
-    async compose() {
+    async compose(input) {
       order.push("compose");
-      return {
-        findings: [1, 2, 3].map((value) => ({ sourceId: `source-${value}`, severity: "medium" as const, confidence: "high" as const, evidenceIds: [`evidence-${value}`] })),
-        verificationItems: [],
-        actions: [
-          { priority: "P0", title: "核查门店目标执行", ownerRole: "区域经理", verificationMetricCode: "sales" },
-          { priority: "P1", title: "复盘运营动作", ownerRole: "运营", verificationMetricCode: "sales" },
-        ],
-      };
+      return createGroundedInsightDraft(input.catalog, input.plan);
     },
   };
 }
