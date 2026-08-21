@@ -25,16 +25,33 @@ export const performanceAttentionStrategies: Partial<
 };
 
 function buildAchievementPlan(catalog: InsightSourceCatalog): InsightAttentionPlan {
-  const sources = subjectSources(catalog, "achievement_rate");
-  const assessments = sources.map((source) => ({
+  const rates = catalog.findingSources.filter((source) => source.metricCode === "achievement_rate");
+  const storeRates = rates.filter((source) => source.attention.subjectKey !== "scope");
+  const riskAssessments = storeRates.map((source) => ({
     source,
     severity: achievementSeverity(source.value),
     score: performanceScore(achievementSeverity(source.value), 100 - source.value),
-  }));
+  })).filter(({ severity }) => severity !== "positive");
 
-  return buildPerformancePlan(catalog, assessments, (source, score, severity) => {
-    return supportCandidates(catalog, source, score, severity, ["sales_gap"]);
-  });
+  if (riskAssessments.length > 0) {
+    return buildPerformancePlan(catalog, riskAssessments, (assessments) => {
+      return assessments.flatMap(({ source, score, severity }) => {
+        return supportCandidates(catalog, source, score, severity, ["sales_gap"]);
+      });
+    });
+  }
+
+  const overall = rates.find((source) => source.attention.subjectKey === "scope");
+  const lowestStore = [...storeRates].sort((left, right) => {
+    return left.value - right.value
+      || left.attention.subjectKey.localeCompare(right.attention.subjectKey);
+  })[0];
+  const healthyAssessments = [
+    ...(overall ? [{ source: overall, severity: "positive" as const, score: 2_000_000 }] : []),
+    ...(lowestStore ? [{ source: lowestStore, severity: "positive" as const, score: 1_000_000 }] : []),
+  ];
+
+  return buildPerformancePlan(catalog, healthyAssessments, () => []);
 }
 
 function buildComparePlan(catalog: InsightSourceCatalog): InsightAttentionPlan {
@@ -50,8 +67,12 @@ function buildComparePlan(catalog: InsightSourceCatalog): InsightAttentionPlan {
     };
   });
 
-  return buildPerformancePlan(catalog, assessments, (source, score, severity) => {
-    return supportCandidates(catalog, source, score, severity, ["sales"]);
+  return buildPerformancePlan(catalog, assessments, (riskAssessments) => {
+    const salesSupport = riskAssessments.flatMap(({ source, score }) => {
+      return supportCandidates(catalog, source, score - 1, "low", ["sales"], "needs_verification");
+    });
+    const verificationSupport = compareVerificationCandidates(catalog, riskAssessments);
+    return uniqueCandidates([...salesSupport, ...verificationSupport]);
   });
 }
 
@@ -84,8 +105,10 @@ function buildOrderPlan(catalog: InsightSourceCatalog): InsightAttentionPlan {
       return [{ source, severity, score }];
     });
 
-  return buildPerformancePlan(catalog, assessments, (source, score, severity) => {
-    return alternatePrimaryCandidates(catalog, source, score, severity, ["order_achievement_rate", "trend_pct"]);
+  return buildPerformancePlan(catalog, assessments, (riskAssessments) => {
+    return riskAssessments.flatMap(({ source, score, severity }) => {
+      return alternatePrimaryCandidates(catalog, source, score, severity, ["order_achievement_rate", "trend_pct"]);
+    });
   });
 }
 
@@ -113,19 +136,17 @@ function buildAovPlan(catalog: InsightSourceCatalog): InsightAttentionPlan {
       return [{ source, severity, score }];
     });
 
-  return buildPerformancePlan(catalog, assessments, (source, score, severity) => {
-    return alternatePrimaryCandidates(catalog, source, score, severity, ["aov_gap", "trend_pct"]);
+  return buildPerformancePlan(catalog, assessments, (riskAssessments) => {
+    return riskAssessments.flatMap(({ source, score, severity }) => {
+      return alternatePrimaryCandidates(catalog, source, score, severity, ["aov_gap", "trend_pct"]);
+    });
   });
 }
 
 function buildPerformancePlan(
   catalog: InsightSourceCatalog,
   assessments: Array<{ source: InsightFindingSource; severity: InsightSeverity; score: number }>,
-  buildSupport: (
-    source: InsightFindingSource,
-    score: number,
-    severity: InsightSeverity
-  ) => InsightAttentionCandidate[]
+  buildSupport: (assessments: Array<{ source: InsightFindingSource; severity: InsightSeverity; score: number }>) => InsightAttentionCandidate[]
 ): InsightAttentionPlan {
   if (assessments.length === 0) {
     return { status: "no_data", findings: [], actionContexts: [] };
@@ -134,9 +155,9 @@ function buildPerformancePlan(
   const risks = assessments.filter(({ severity }) => severity === "high" || severity === "medium");
   const selectedAssessments = risks.length > 0 ? risks : assessments;
   const primaryCandidates = selectedAssessments.map(({ source, score, severity }) => candidate(source, score, severity));
-  const support = risks.flatMap(({ source, score, severity }) => buildSupport(source, score, severity));
+  const support = risks.length > 0 ? buildSupport(risks) : [];
   const selected = selectDiverseCandidates([...primaryCandidates, ...support], {
-    maxFindings: 5,
+    maxFindings: risks.length > 0 ? 5 : 3,
     minFindings: 1,
   });
 
@@ -182,7 +203,8 @@ function supportCandidates(
   source: InsightFindingSource,
   score: number,
   severity: InsightSeverity,
-  metricCodes: string[]
+  metricCodes: string[],
+  confidence: InsightAttentionCandidate["confidence"] = "high"
 ): InsightAttentionCandidate[] {
   return catalog.findingSources
     .filter((item) => {
@@ -190,7 +212,41 @@ function supportCandidates(
         && item.attention.role === "support"
         && metricCodes.includes(item.metricCode);
     })
-    .map((item) => candidate(item, score - 0.5, severity, "support"));
+    .map((item) => candidate(item, score - 0.5, severity, "support", confidence));
+}
+
+function compareVerificationCandidates(
+  catalog: InsightSourceCatalog,
+  assessments: Array<{ source: InsightFindingSource; severity: InsightSeverity; score: number }>
+): InsightAttentionCandidate[] {
+  const highestRiskScore = Math.max(...assessments.map(({ score }) => score));
+  return ["refund_rate", "orders", "aov"].flatMap((metricCode, index) => {
+    const source = crossStoreDifferenceSource(catalog, metricCode);
+    return source
+      ? [candidate(source, highestRiskScore - (index + 2), "low", "support", "needs_verification")]
+      : [];
+  });
+}
+
+function crossStoreDifferenceSource(
+  catalog: InsightSourceCatalog,
+  metricCode: string
+): InsightFindingSource | undefined {
+  const sources = catalog.findingSources.filter((source) => source.metricCode === metricCode);
+  if (sources.length < 2 || new Set(sources.map((source) => source.value)).size < 2) return undefined;
+  return [...sources].sort((left, right) => {
+    return right.value - left.value
+      || left.attention.subjectKey.localeCompare(right.attention.subjectKey);
+  })[0];
+}
+
+function uniqueCandidates(candidates: InsightAttentionCandidate[]): InsightAttentionCandidate[] {
+  const ids = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (ids.has(candidate.sourceId)) return false;
+    ids.add(candidate.sourceId);
+    return true;
+  });
 }
 
 function alternatePrimaryCandidates(
@@ -213,7 +269,8 @@ function candidate(
   source: InsightFindingSource,
   score: number,
   severity: InsightSeverity,
-  role: InsightAttentionCandidate["role"] = "primary"
+  role: InsightAttentionCandidate["role"] = "primary",
+  confidence: InsightAttentionCandidate["confidence"] = "high"
 ): InsightAttentionCandidate {
   return {
     sourceId: source.id,
@@ -221,7 +278,7 @@ function candidate(
     role,
     score,
     severity,
-    confidence: "high",
+    confidence,
     evidenceIds: source.evidenceCandidateIds,
   };
 }
