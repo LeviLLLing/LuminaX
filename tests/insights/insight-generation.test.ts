@@ -149,18 +149,43 @@ const reportFixture = {
     promoRate: 7.7,
   },
   storeRanking: [
-    achievementStore("S001", "上海商场店", 102),
-    achievementStore("S004", "地铁站店", 82),
-    achievementStore("S005", "社区中心店", 94),
+    { ...achievementStore("S001", "上海商场店", 102), salesRank: 1 },
+    { ...achievementStore("S004", "地铁站店", 82), salesRank: 3 },
+    { ...achievementStore("S005", "社区中心店", 94), salesRank: 2 },
   ],
   dailyTrend: [
-    { date: "2026-08-01", sales: 47000, target: 50000, orders: 890, avgAOV: 52.81, isAnomaly: 0 },
-    { date: "2026-08-02", sales: 31000, target: 50000, orders: 640, avgAOV: 48.44, isAnomaly: 1 },
-    { date: "2026-08-03", sales: 39000, target: 50000, orders: 720, avgAOV: 54.17, isAnomaly: 1 },
+    { date: "2026-08-01", sales: 47000, target: 50000, orders: 890, avgAOV: 52.81, salesRankDesc: 1, salesRankAsc: 3, isAnomaly: 0, weekendAvg: 39000, weekdayAvg: 47000, weekendVs: -17 },
+    { date: "2026-08-02", sales: 31000, target: 50000, orders: 640, avgAOV: 48.44, salesRankDesc: 3, salesRankAsc: 1, isAnomaly: 1, weekendAvg: 39000, weekdayAvg: 47000, weekendVs: -17 },
+    { date: "2026-08-03", sales: 39000, target: 50000, orders: 720, avgAOV: 54.17, salesRankDesc: 2, salesRankAsc: 2, isAnomaly: 1, weekendAvg: 39000, weekdayAvg: 47000, weekendVs: -17 },
   ],
   channelBreakdown: [{ dimensionType: "channel", dimensionName: "堂食", value: 180000, pct: 64.7 }],
   categoryBreakdown: [{ dimensionType: "category", dimensionName: "正餐", value: 190000, pct: 68.3 }],
   daypartBreakdown: [{ dimensionType: "daypart", dimensionName: "午餐", value: 160000, pct: 57.6 }],
+};
+
+const completeAchievementFixture = {
+  stores: [
+    {
+      ...achievementStore("S001", "上海商场店", 102),
+      dailyAchievement: [
+        { date: "2026-08-01", actualSales: 52000, salesTarget: 50000, gap: 2000, achievementRate: 104 },
+        { date: "2026-08-03", actualSales: 50000, salesTarget: 50000, gap: 0, achievementRate: 100 },
+      ],
+    },
+    {
+      ...achievementStore("S004", "地铁站店", 82),
+      dailyAchievement: [
+        { date: "2026-08-01", actualSales: 42000, salesTarget: 50000, gap: -8000, achievementRate: 84 },
+        { date: "2026-08-03", actualSales: 40000, salesTarget: 50000, gap: -10000, achievementRate: 80 },
+      ],
+    },
+  ],
+  overall: {
+    totalSales: 184000,
+    totalTarget: 200000,
+    gap: -16000,
+    achievementRate: 92,
+  },
 };
 
 test("achievement catalog includes every store instead of the first five values", () => {
@@ -173,13 +198,36 @@ test("achievement catalog includes every store instead of the first five values"
     ]),
   });
   const rateLabels = catalog.findingSources
-    .filter((item) => item.metricCode === "achievement_rate")
+    .filter((item) => item.metricCode === "achievement_rate" && item.subjectIds.length === 1)
     .map((item) => item.label);
   assert.deepEqual(rateLabels, [
     "上海商场店目标达成率",
     "地铁站店目标达成率",
     "社区中心店目标达成率",
   ]);
+});
+
+test("achievement catalog retains overall and every store-date fact", () => {
+  const catalog = buildInsightSourceCatalog({ intent: "achievement_rate", analysisData: completeAchievementFixture });
+
+  const overallRate = catalog.findingSources.find((item) => item.label === "整体目标达成率");
+  assert.deepEqual(overallRate?.subjectIds, []);
+  assert.deepEqual(overallRate?.attention, {
+    subjectKey: "scope",
+    role: "primary",
+    signal: "achievement",
+    benchmark: 100,
+    delta: -8,
+  });
+  const laterRate = catalog.findingSources.find((item) => item.metricCode === "daily_achievement_rate" && item.value === 80);
+  assert.deepEqual(laterRate?.subjectIds, ["S004", "2026-08-03"]);
+  assert.equal(laterRate?.attention.role, "primary");
+  for (const metricCode of ["daily_sales", "daily_target", "daily_sales_gap"]) {
+    const source = catalog.findingSources.find((item) => item.metricCode === metricCode && item.subjectIds[0] === "S004" && item.subjectIds[1] === "2026-08-03");
+    assert.ok(source, `missing later store-date ${metricCode}`);
+    assert.equal(source.attention.role, "support");
+    assert.ok(source.evidenceCandidateIds.length > 0);
+  }
 });
 
 test("report catalog retains semantic achievement, refund, anomaly, and structure facts", () => {
@@ -204,6 +252,38 @@ test("report catalog retains semantic achievement, refund, anomaly, and structur
       .map((item) => item.label),
     ["堂食销售额", "正餐销售额", "午餐销售额"]
   );
+  for (const [metricCode, value] of [
+    ["total_orders", 5100],
+    ["avg_aov", 54.51],
+    ["cancelled_orders", 44],
+    ["promo_sales", 21300],
+    ["promo_rate", 7.7],
+  ] as const) {
+    assert.ok(catalog.findingSources.some((item) => item.metricCode === metricCode && item.value === value), `missing report summary ${metricCode}`);
+  }
+  const storeRank = catalog.findingSources.find((item) => item.metricCode === "store_sales_rank" && item.subjectIds[0] === "S004");
+  assert.equal(storeRank?.value, 3);
+  assert.equal(storeRank?.attention.role, "support");
+  for (const [metricCode, value] of [
+    ["daily_sales", 47000],
+    ["daily_target", 50000],
+    ["daily_orders", 890],
+    ["daily_avg_aov", 52.81],
+    ["daily_sales_rank_desc", 1],
+    ["daily_sales_rank_asc", 3],
+    ["daily_anomaly_flag", 0],
+    ["daily_weekend_avg", 39000],
+    ["daily_weekday_avg", 47000],
+    ["daily_weekend_vs", -17],
+  ] as const) {
+    const source = catalog.findingSources.find((item) => item.metricCode === metricCode && item.value === value && item.subjectIds[0] === "2026-08-01");
+    assert.ok(source, `missing non-anomalous report ${metricCode}`);
+    assert.equal(source.attention.role, "support");
+  }
+  assert.equal(
+    catalog.findingSources.find((item) => item.metricCode === "daily_sales" && item.subjectIds[0] === "2026-08-01")?.attention.signal,
+    "neutral"
+  );
 });
 
 test("catalog sources include deterministic attention metadata", () => {
@@ -227,7 +307,7 @@ test("catalog sources include deterministic attention metadata", () => {
   const anomaly = reportCatalog.findingSources.find((item) => item.metricCode === "daily_anomaly");
   assert.deepEqual(anomaly?.attention, {
     subjectKey: "2026-08-02",
-    role: "primary",
+    role: "support",
     signal: "anomaly",
     benchmark: 50000,
     delta: -19000,
@@ -236,6 +316,45 @@ test("catalog sources include deterministic attention metadata", () => {
   for (const intent of Object.keys(fixtures) as AnalysisIntent[]) {
     const catalog = buildInsightSourceCatalog({ intent, analysisData: fixtures[intent] });
     assert.ok(catalog.findingSources.every((item) => item.attention.subjectKey.length > 0));
+  }
+});
+
+test("every catalog builder keeps rates, trends, and anomaly counts primary while raw facts support", () => {
+  type RoleExpectation = string | readonly [metricCode: string, label: string];
+  const roleCases: Array<{
+    intent: AnalysisIntent;
+    analysisData: Record<string, unknown>;
+    primary: RoleExpectation[];
+    support: RoleExpectation[];
+  }> = [
+    { intent: "achievement_rate", analysisData: completeAchievementFixture, primary: ["achievement_rate", "daily_achievement_rate"], support: ["sales", "target", "sales_gap", "daily_sales", "daily_target", "daily_sales_gap"] },
+    { intent: "order_trend", analysisData: fixtures.order_trend, primary: ["order_achievement_rate", "trend_pct"], support: ["total_orders"] },
+    { intent: "aov_trend", analysisData: fixtures.aov_trend, primary: ["aov_gap", "trend_pct"], support: ["avg_aov", "target_aov"] },
+    { intent: "channel_mix", analysisData: fixtures.channel_mix, primary: ["channel_pct"], support: ["channel_value"] },
+    { intent: "daypart_analysis", analysisData: fixtures.daypart_analysis, primary: ["daypart_pct"], support: ["daypart_value"] },
+    { intent: "promotion_contribution", analysisData: fixtures.promotion_contribution, primary: ["contribution_rate", "store_contribution_rate"], support: ["total_discount", "promotion_value"] },
+    { intent: "refund_rate", analysisData: fixtures.refund_rate, primary: ["refund_rate", "cancel_rate", "daily_refund_rate", "store_refund_rate"], support: [] },
+    { intent: "anomaly_detection", analysisData: fixtures.anomaly_detection, primary: ["anomaly_count"], support: ["anomaly_day"] },
+    { intent: "compare", analysisData: fixtures.compare, primary: ["achievement_rate", "refund_rate"], support: ["sales", "target", "orders", "aov", "refund", "channel_contribution", "category_contribution", "daypart_contribution"] },
+    { intent: "attribution", analysisData: fixtures.attribution, primary: [["sales_summary", "目标达成率"], "decomposition", "factor_contribution", "dimension_contribution", "channel_contribution", "category_contribution", "daypart_contribution"], support: [["sales_summary", "销售额"], ["sales_summary", "销售目标"], ["sales_summary", "订单量"], ["sales_summary", "客单价"], "store_refund"] },
+    { intent: "report", analysisData: reportFixture, primary: ["achievement_rate", "refund_rate"], support: ["sales", "target", "refund", "total_orders", "avg_aov", "cancelled_orders", "promo_sales", "promo_rate", "store_sales_rank", "daily_sales", "daily_target", "daily_orders", "daily_avg_aov", "daily_sales_rank_desc", "daily_sales_rank_asc", "daily_anomaly_flag", "daily_weekend_avg", "daily_weekday_avg", "daily_weekend_vs", "channel_structure", "category_structure", "daypart_structure"] },
+    { intent: "custom_metric", analysisData: { metric: { code: "custom_sales_total", name: "自定义销售额", precision: 2 }, result: { rows: [{ metric_value: 772076 }], rowCount: 1, columns: ["metric_value"] } }, primary: ["custom_metric_value"], support: [] },
+  ];
+
+  for (const { intent, analysisData, primary, support } of roleCases) {
+    const catalog = buildInsightSourceCatalog({ intent, analysisData });
+    for (const expectation of primary) {
+      const [metricCode, label] = typeof expectation === "string" ? [expectation, undefined] : expectation;
+      const sources = catalog.findingSources.filter((item) => item.metricCode === metricCode && (label === undefined || item.label === label));
+      assert.ok(sources.length > 0, `missing ${intent} primary ${metricCode}`);
+      assert.ok(sources.every((item) => item.attention.role === "primary"), `${intent} ${metricCode} must be primary`);
+    }
+    for (const expectation of support) {
+      const [metricCode, label] = typeof expectation === "string" ? [expectation, undefined] : expectation;
+      const sources = catalog.findingSources.filter((item) => item.metricCode === metricCode && (label === undefined || item.label === label));
+      assert.ok(sources.length > 0, `missing ${intent} support ${metricCode}`);
+      assert.ok(sources.every((item) => item.attention.role === "support"), `${intent} ${metricCode} must be support`);
+    }
   }
 });
 

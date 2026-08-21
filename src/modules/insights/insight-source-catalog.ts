@@ -284,6 +284,40 @@ function buildGeneric(builder: CatalogBuilder, data: UnknownRecord): void {
 }
 
 function buildAchievementRate(builder: CatalogBuilder, data: UnknownRecord): void {
+  const overall = record(data.overall);
+  const overallSales = numberValue(overall.totalSales);
+  const overallTarget = numberValue(overall.totalTarget);
+  const overallGap = numberValue(overall.gap);
+  const overallRate = numberValue(overall.achievementRate);
+  const overallPerformance = builder.evidence(
+    "overall.performance",
+    "period_variance",
+    "整体目标表现",
+    "currency",
+    "销售目标",
+    [series("整体销售额", overall.totalSales, overall.totalTarget)]
+  );
+  const overallGapEvidence = builder.evidence(
+    "overall.gap",
+    "metric_drivers",
+    "整体销售目标差额",
+    "currency",
+    "销售目标差额",
+    [series("整体销售目标差额", overall.gap)]
+  );
+  const overallRateEvidence = builder.evidence(
+    "overall.achievementRate",
+    "period_variance",
+    "整体目标达成率",
+    "percentage",
+    "目标达成率",
+    [series("整体目标达成率", overall.achievementRate)]
+  );
+  builder.source("overall.totalSales", "sales", "整体销售额", overall.totalSales, "currency", [], [overallPerformance], attentionMetadata("scope", "support", "achievement", overallTarget ?? undefined, overallSales === null || overallTarget === null ? undefined : overallSales - overallTarget));
+  builder.source("overall.totalTarget", "target", "整体销售目标", overall.totalTarget, "currency", [], [overallPerformance], attentionMetadata("scope", "support", "achievement"));
+  builder.source("overall.gap", "sales_gap", "整体销售目标差额", overall.gap, "currency", [], [overallGapEvidence], attentionMetadata("scope", "support", "achievement", 0, overallGap ?? undefined));
+  builder.source("overall.achievementRate", "achievement_rate", "整体目标达成率", overall.achievementRate, "percentage", [], [overallRateEvidence], attentionMetadata("scope", "primary", "achievement", 100, overallRate === null ? undefined : overallRate - 100));
+
   const stores = records(data.stores).flatMap((store) => {
     const subject = subjectOf(store, "storeId", "storeName");
     return subject ? [{ store, subject }] : [];
@@ -322,6 +356,45 @@ function buildAchievementRate(builder: CatalogBuilder, data: UnknownRecord): voi
     builder.source("stores.totalSales", "sales", `${subject.label}销售额`, store.totalSales, "currency", [subject.id], [performance], attentionMetadata(subject.id, "support", "achievement", target ?? undefined, sales === null || target === null ? undefined : sales - target));
     builder.source("stores.totalTarget", "target", `${subject.label}销售目标`, store.totalTarget, "currency", [subject.id], [performance], attentionMetadata(subject.id, "support", "achievement"));
     builder.source("stores.gap", "sales_gap", `${subject.label}销售目标差额`, store.gap, "currency", [subject.id], [performance, gapEvidence], attentionMetadata(subject.id, "support", "achievement", 0, gap ?? undefined));
+
+    const daily = records(store.dailyAchievement).flatMap((day) => {
+      const date = textValue(day.date);
+      return date ? [{ day, date }] : [];
+    });
+    const dailyPerformance = builder.evidence(
+      `stores.${subject.id}.dailyAchievement.performance`,
+      "period_variance",
+      `${subject.label}每日目标表现`,
+      "currency",
+      "当日销售目标",
+      daily.map(({ day, date }) => series(date, day.actualSales, day.salesTarget))
+    );
+    const dailyGapEvidence = builder.evidence(
+      `stores.${subject.id}.dailyAchievement.gap`,
+      "metric_drivers",
+      `${subject.label}每日销售目标差额`,
+      "currency",
+      "销售目标差额",
+      daily.map(({ day, date }) => series(`${date}目标差额`, day.gap))
+    );
+    const dailyRateEvidence = builder.evidence(
+      `stores.${subject.id}.dailyAchievement.rate`,
+      "period_variance",
+      `${subject.label}每日目标达成率`,
+      "percentage",
+      "目标达成率",
+      daily.map(({ day, date }) => series(date, day.achievementRate))
+    );
+    for (const { day, date } of daily) {
+      const dailySales = numberValue(day.actualSales);
+      const dailyTarget = numberValue(day.salesTarget);
+      const dailyGap = numberValue(day.gap);
+      const dailyRate = numberValue(day.achievementRate);
+      builder.source("stores.dailyAchievement.actualSales", "daily_sales", `${subject.label}${date}销售额`, day.actualSales, "currency", [subject.id, date], [dailyPerformance], attentionMetadata(subject.id, "support", "achievement", dailyTarget ?? undefined, dailySales === null || dailyTarget === null ? undefined : dailySales - dailyTarget));
+      builder.source("stores.dailyAchievement.salesTarget", "daily_target", `${subject.label}${date}销售目标`, day.salesTarget, "currency", [subject.id, date], [dailyPerformance], attentionMetadata(subject.id, "support", "achievement"));
+      builder.source("stores.dailyAchievement.gap", "daily_sales_gap", `${subject.label}${date}销售目标差额`, day.gap, "currency", [subject.id, date], [dailyGapEvidence], attentionMetadata(subject.id, "support", "achievement", 0, dailyGap ?? undefined));
+      builder.source("stores.dailyAchievement.achievementRate", "daily_achievement_rate", `${subject.label}${date}目标达成率`, day.achievementRate, "percentage", [subject.id, date], [dailyRateEvidence], attentionMetadata(subject.id, "primary", "achievement", 100, dailyRate === null ? undefined : dailyRate - 100));
+    }
   }
 }
 
@@ -345,11 +418,23 @@ function buildReport(builder: CatalogBuilder, data: UnknownRecord): void {
   const refundRate = numberValue(summary.refundRate);
   const summaryPerformance = builder.evidence("summary.performance", "period_variance", "整体目标表现", "currency", "销售目标", [series("销售额", summary.totalSales, summary.totalTarget)]);
   const summaryRates = builder.evidence("summary.rates", "metric_drivers", "整体经营比率", "percentage", "整体比率", [series("目标达成率", summary.achievementRate), series("退款率", summary.refundRate)]);
+  const summaryAvailability = builder.evidence("summary.storeCount", "metric_drivers", "门店数量", "count", "门店数量", [series("门店数量", summary.storeCount)]);
+  const summaryOrders = builder.evidence("summary.totalOrders", "metric_drivers", "整体订单量", "count", "订单量", [series("整体订单量", summary.totalOrders)]);
+  const summaryAov = builder.evidence("summary.avgAOV", "metric_drivers", "整体平均客单价", "currency", "客单价", [series("整体平均客单价", summary.avgAOV)]);
+  const summaryCancellation = builder.evidence("summary.totalCancelled", "metric_drivers", "整体取消订单数", "count", "取消订单数", [series("整体取消订单数", summary.totalCancelled)]);
+  const summaryPromo = builder.evidence("summary.totalPromo", "metric_drivers", "整体促销销售额", "currency", "促销销售额", [series("整体促销销售额", summary.totalPromo)]);
+  const summaryPromoRate = builder.evidence("summary.promoRate", "metric_drivers", "整体促销贡献率", "percentage", "促销贡献率", [series("整体促销贡献率", summary.promoRate)]);
+  builder.source("summary.storeCount", "store_count", "门店数量", summary.storeCount, "count", [], [summaryAvailability], attentionMetadata("scope", "support", "data_availability"));
   builder.source("summary.totalSales", "sales", "整体销售额", summary.totalSales, "currency", [], [summaryPerformance], attentionMetadata("scope", "support", "achievement", totalTarget ?? undefined, totalSales === null || totalTarget === null ? undefined : totalSales - totalTarget));
   builder.source("summary.totalTarget", "target", "整体销售目标", summary.totalTarget, "currency", [], [summaryPerformance], attentionMetadata("scope", "support", "achievement"));
   builder.source("summary.achievementRate", "achievement_rate", "整体目标达成率", summary.achievementRate, "percentage", [], [summaryRates], attentionMetadata("scope", "primary", "achievement", 100, achievementRate === null ? undefined : achievementRate - 100));
   builder.source("summary.totalRefund", "refund", "整体退款额", summary.totalRefund, "currency", [], [summaryRates], attentionMetadata("scope", "support", "risk_rate"));
   builder.source("summary.refundRate", "refund_rate", "整体退款率", summary.refundRate, "percentage", [], [summaryRates], attentionMetadata("scope", "primary", "risk_rate", 2, refundRate === null ? undefined : refundRate - 2));
+  builder.source("summary.totalOrders", "total_orders", "整体订单量", summary.totalOrders, "count", [], [summaryOrders], attentionMetadata("scope", "support", "neutral"));
+  builder.source("summary.avgAOV", "avg_aov", "整体平均客单价", summary.avgAOV, "currency", [], [summaryAov], attentionMetadata("scope", "support", "neutral"));
+  builder.source("summary.totalCancelled", "cancelled_orders", "整体取消订单数", summary.totalCancelled, "count", [], [summaryCancellation], attentionMetadata("scope", "support", "neutral"));
+  builder.source("summary.totalPromo", "promo_sales", "整体促销销售额", summary.totalPromo, "currency", [], [summaryPromo], attentionMetadata("scope", "support", "neutral"));
+  builder.source("summary.promoRate", "promo_rate", "整体促销贡献率", summary.promoRate, "percentage", [], [summaryPromoRate], attentionMetadata("scope", "support", "neutral"));
 
   const stores = records(data.storeRanking).flatMap((store) => {
     const subject = subjectOf(store, "storeId", "storeName");
@@ -357,6 +442,7 @@ function buildReport(builder: CatalogBuilder, data: UnknownRecord): void {
   });
   const storePerformance = builder.evidence("storeRanking.performance", "store_target_variance", "门店目标表现", "currency", "销售目标", stores.map(({ store, subject }) => series(subject.label, store.totalSales, store.totalTarget)));
   const storeRates = builder.evidence("storeRanking.achievementRate", "store_target_variance", "门店目标达成率", "percentage", "目标达成率", stores.map(({ store, subject }) => series(subject.label, store.achievementRate)));
+  const storeRanks = builder.evidence("storeRanking.salesRank", "store_target_variance", "门店销售排名", "count", "销售排名", stores.map(({ store, subject }) => series(subject.label, store.salesRank)));
   for (const { store, subject } of stores) {
     const sales = numberValue(store.totalSales);
     const target = numberValue(store.totalTarget);
@@ -364,17 +450,36 @@ function buildReport(builder: CatalogBuilder, data: UnknownRecord): void {
     builder.source("storeRanking.totalSales", "sales", `${subject.label}销售额`, store.totalSales, "currency", [subject.id], [storePerformance], attentionMetadata(subject.id, "support", "achievement", target ?? undefined, sales === null || target === null ? undefined : sales - target));
     builder.source("storeRanking.totalTarget", "target", `${subject.label}销售目标`, store.totalTarget, "currency", [subject.id], [storePerformance], attentionMetadata(subject.id, "support", "achievement"));
     builder.source("storeRanking.achievementRate", "achievement_rate", `${subject.label}目标达成率`, store.achievementRate, "percentage", [subject.id], [storeRates], attentionMetadata(subject.id, "primary", "achievement", 100, rate === null ? undefined : rate - 100));
+    builder.source("storeRanking.salesRank", "store_sales_rank", `${subject.label}销售排名`, store.salesRank, "count", [subject.id], [storeRanks], attentionMetadata(subject.id, "support", "neutral"));
   }
 
-  const anomalies = records(data.dailyTrend).flatMap((day) => {
+  const daily = records(data.dailyTrend).flatMap((day) => {
     const date = textValue(day.date);
-    return date && (numberValue(day.isAnomaly) || 0) > 0 ? [{ day, date }] : [];
+    return date ? [{ day, date }] : [];
   });
-  const anomalyEvidence = builder.evidence("dailyTrend.anomalies", "anomaly_dates", "异常日期", "currency", "当日销售目标", anomalies.map(({ day, date }) => series(date, day.sales, day.target)));
-  for (const { day, date } of anomalies) {
+  const anomalyEvidence = builder.evidence("dailyTrend.anomalies", "anomaly_dates", "异常日期", "currency", "当日销售目标", daily.filter(({ day }) => (numberValue(day.isAnomaly) || 0) > 0).map(({ day, date }) => series(date, day.sales, day.target)));
+  const dailyPerformance = builder.evidence("dailyTrend.performance", "period_variance", "每日目标表现", "currency", "当日销售目标", daily.map(({ day, date }) => series(date, day.sales, day.target)));
+  const dailyOrders = builder.evidence("dailyTrend.orders", "metric_drivers", "每日订单量", "count", "订单量", daily.map(({ day, date }) => series(date, day.orders)));
+  const dailyAov = builder.evidence("dailyTrend.avgAOV", "metric_drivers", "每日客单价", "currency", "客单价", daily.map(({ day, date }) => series(date, day.avgAOV)));
+  const dailyRank = builder.evidence("dailyTrend.ranks", "metric_drivers", "每日销售排名", "count", "销售排名", daily.flatMap(({ day, date }) => [series(`${date}销售高位排名`, day.salesRankDesc), series(`${date}销售低位排名`, day.salesRankAsc)]));
+  const dailyAnomalyFlag = builder.evidence("dailyTrend.isAnomaly", "anomaly_dates", "每日异常标记", "count", "异常标记", daily.map(({ day, date }) => series(date, day.isAnomaly)));
+  const dailyWeekendAverages = builder.evidence("dailyTrend.weekendAverages", "metric_drivers", "周末工作日均值", "currency", "销售均值", daily.flatMap(({ day, date }) => [series(`${date}周末均值`, day.weekendAvg), series(`${date}工作日均值`, day.weekdayAvg)]));
+  const dailyWeekendVariance = builder.evidence("dailyTrend.weekendVs", "metric_drivers", "周末工作日差异", "percentage", "周末工作日差异", daily.map(({ day, date }) => series(date, day.weekendVs)));
+  for (const { day, date } of daily) {
     const sales = numberValue(day.sales);
     const target = numberValue(day.target);
-    builder.source("dailyTrend.sales", "daily_anomaly", `${date}销售额`, day.sales, "currency", [date], [anomalyEvidence], attentionMetadata(date, "primary", "anomaly", target ?? undefined, sales === null || target === null ? undefined : sales - target));
+    const isAnomaly = (numberValue(day.isAnomaly) || 0) > 0;
+    const evidence = isAnomaly ? [anomalyEvidence, dailyPerformance] : [dailyPerformance];
+    builder.source("dailyTrend.sales", isAnomaly ? "daily_anomaly" : "daily_sales", `${date}销售额`, day.sales, "currency", [date], evidence, attentionMetadata(date, "support", isAnomaly ? "anomaly" : "neutral", target ?? undefined, sales === null || target === null ? undefined : sales - target));
+    builder.source("dailyTrend.target", "daily_target", `${date}销售目标`, day.target, "currency", [date], [dailyPerformance], attentionMetadata(date, "support", "neutral"));
+    builder.source("dailyTrend.orders", "daily_orders", `${date}订单量`, day.orders, "count", [date], [dailyOrders], attentionMetadata(date, "support", "neutral"));
+    builder.source("dailyTrend.avgAOV", "daily_avg_aov", `${date}客单价`, day.avgAOV, "currency", [date], [dailyAov], attentionMetadata(date, "support", "neutral"));
+    builder.source("dailyTrend.salesRankDesc", "daily_sales_rank_desc", `${date}销售高位排名`, day.salesRankDesc, "count", [date], [dailyRank], attentionMetadata(date, "support", "neutral"));
+    builder.source("dailyTrend.salesRankAsc", "daily_sales_rank_asc", `${date}销售低位排名`, day.salesRankAsc, "count", [date], [dailyRank], attentionMetadata(date, "support", "neutral"));
+    builder.source("dailyTrend.isAnomaly", "daily_anomaly_flag", `${date}异常标记`, day.isAnomaly, "count", [date], [dailyAnomalyFlag], attentionMetadata(date, "support", "anomaly"));
+    builder.source("dailyTrend.weekendAvg", "daily_weekend_avg", `${date}周末销售均值`, day.weekendAvg, "currency", [date], [dailyWeekendAverages], attentionMetadata(date, "support", "neutral"));
+    builder.source("dailyTrend.weekdayAvg", "daily_weekday_avg", `${date}工作日销售均值`, day.weekdayAvg, "currency", [date], [dailyWeekendAverages], attentionMetadata(date, "support", "neutral"));
+    builder.source("dailyTrend.weekendVs", "daily_weekend_vs", `${date}周末工作日销售差异`, day.weekendVs, "percentage", [date], [dailyWeekendVariance], attentionMetadata(date, "support", "neutral"));
   }
   addReportStructureSources(builder, data.channelBreakdown, "channel");
   addReportStructureSources(builder, data.categoryBreakdown, "category");
@@ -388,8 +493,10 @@ function addReportStructureSources(builder: CatalogBuilder, value: unknown, dime
     return name ? [{ item, name }] : [];
   });
   const evidence = builder.evidence(`${dimension}Breakdown`, `${dimension}_contribution` as InsightEvidenceType, `${labelPrefix}销售结构`, "currency", "销售额", entries.map(({ item, name }) => series(name, item.value)));
+  const percentages = builder.evidence(`${dimension}Breakdown.pct`, `${dimension}_contribution` as InsightEvidenceType, `${labelPrefix}销售占比`, "percentage", "销售占比", entries.map(({ item, name }) => series(name, item.pct)));
   for (const { item, name } of entries) {
-    builder.source(`${dimension}Breakdown.value`, `${dimension}_structure`, `${name}销售额`, item.value, "currency", [name], [evidence], attentionMetadata(name, "primary", "structure"));
+    builder.source(`${dimension}Breakdown.value`, `${dimension}_structure`, `${name}销售额`, item.value, "currency", [name], [evidence], attentionMetadata(name, "support", "structure"));
+    builder.source(`${dimension}Breakdown.pct`, `${dimension}_structure_pct`, `${name}销售占比`, item.pct, "percentage", [name], [percentages], attentionMetadata(name, "primary", "structure"));
   }
 }
 
@@ -495,7 +602,7 @@ function buildMix(builder: CatalogBuilder, data: UnknownRecord, dimension: "chan
     for (const item of records(store[storeKey])) {
       const name = textValue(item[nameKey]);
       if (!name) continue;
-      builder.source(`byStore.${storeKey}.sales`, `${dimension}_value`, `${subject.label}${name}销售额`, item.sales, "currency", [subject.id, name], [valueEvidence], attentionMetadata(subject.id, "primary", "structure"));
+      builder.source(`byStore.${storeKey}.sales`, `${dimension}_value`, `${subject.label}${name}销售额`, item.sales, "currency", [subject.id, name], [valueEvidence], attentionMetadata(subject.id, "support", "structure"));
     }
   }
 }
@@ -514,13 +621,13 @@ function buildPromotion(builder: CatalogBuilder, data: UnknownRecord): void {
   const rateVariance = builder.evidence("byStore.contributionRate", "store_target_variance", "门店促销贡献差异", "percentage", "促销贡献率", stores.map(({ store, subject }) => series(subject.label, store.contributionRate)));
   const discountVariance = builder.evidence("byStore.totalDiscount", "store_target_variance", "门店优惠金额差异", "currency", "优惠金额", stores.map(({ store, subject }) => series(subject.label, store.totalDiscount)));
   builder.source("contributionRate", "contribution_rate", "促销贡献率", data.contributionRate, "percentage", [], [rateDriver], attentionMetadata("scope", "primary", "structure"));
-  builder.source("totalDiscount", "total_discount", "促销优惠总额", data.totalDiscount, "currency", [], [discountDriver], attentionMetadata("scope", "primary", "structure"));
+  builder.source("totalDiscount", "total_discount", "促销优惠总额", data.totalDiscount, "currency", [], [discountDriver], attentionMetadata("scope", "support", "structure"));
   for (const { item, name } of details) {
-    builder.source("promotionDetails.discountAmount", "promotion_value", `${name}优惠金额`, item.discountAmount, "currency", [name], [discountDriver], attentionMetadata(name, "primary", "structure"));
+    builder.source("promotionDetails.discountAmount", "promotion_value", `${name}优惠金额`, item.discountAmount, "currency", [name], [discountDriver], attentionMetadata(name, "support", "structure"));
   }
   for (const { store, subject } of stores) {
     builder.source("byStore.contributionRate", "store_contribution_rate", `${subject.label}促销贡献率`, store.contributionRate, "percentage", [subject.id], [rateVariance], attentionMetadata(subject.id, "primary", "structure"));
-    builder.source("byStore.totalDiscount", "total_discount", `${subject.label}优惠金额`, store.totalDiscount, "currency", [subject.id], [discountVariance], attentionMetadata(subject.id, "primary", "structure"));
+    builder.source("byStore.totalDiscount", "total_discount", `${subject.label}优惠金额`, store.totalDiscount, "currency", [subject.id], [discountVariance], attentionMetadata(subject.id, "support", "structure"));
   }
 }
 
@@ -558,7 +665,7 @@ function buildAnomaly(builder: CatalogBuilder, data: UnknownRecord): void {
     builder.evidence(`stores.${subject.id}.anomalyDrivers`, "metric_drivers", `${subject.label}异常驱动`, "ratio", "标准分", days.map(({ day, date }) => series(date, day.zScore)));
     const count = builder.evidence(`stores.${subject.id}.anomalyCount`, "metric_drivers", `${subject.label}异常日数量`, "count", "异常日数量", [series("异常日数量", store.anomalyCount)]);
     builder.source("stores.anomalyCount", "anomaly_count", `${subject.label}异常日数量`, store.anomalyCount, "count", [subject.id], [count], attentionMetadata(subject.id, "primary", "anomaly", 0, numberValue(store.anomalyCount) ?? undefined));
-    for (const { day, date } of days) builder.source("stores.anomalyDays.actualSales", "anomaly_day", `${subject.label}${date}销售额`, day.actualSales, "currency", [subject.id, date], [dates], attentionMetadata(subject.id, "primary", "anomaly", numberValue(day.salesTarget) ?? undefined, numberValue(day.actualSales) === null || numberValue(day.salesTarget) === null ? undefined : numberValue(day.actualSales)! - numberValue(day.salesTarget)!));
+    for (const { day, date } of days) builder.source("stores.anomalyDays.actualSales", "anomaly_day", `${subject.label}${date}销售额`, day.actualSales, "currency", [subject.id, date], [dates], attentionMetadata(subject.id, "support", "anomaly", numberValue(day.salesTarget) ?? undefined, numberValue(day.actualSales) === null || numberValue(day.salesTarget) === null ? undefined : numberValue(day.actualSales)! - numberValue(day.salesTarget)!));
   }
 }
 
@@ -677,7 +784,7 @@ function addBreakdownSources(builder: CatalogBuilder, store: UnknownRecord, subj
   for (const [rawName, value] of Object.entries(record(store[key]))) {
     const name = textValue(rawName);
     if (!name) continue;
-    builder.source(`stores.${key}`, metricCode, `${subject.label}${name}销售额`, value, "currency", [subject.id, name], [evidenceId], attentionMetadata(subject.id, "primary", "structure"));
+    builder.source(`stores.${key}`, metricCode, `${subject.label}${name}销售额`, value, "currency", [subject.id, name], [evidenceId], attentionMetadata(subject.id, "support", "structure"));
   }
 }
 
