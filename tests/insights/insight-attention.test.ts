@@ -304,6 +304,138 @@ test("healthy refund and structure plans stay neutral and use benchmark-verifica
 });
 
 for (const scenario of [
+  { name: "exactly two percent", overall: 1.5, rate: 2, status: "risk", severity: "medium" },
+  { name: "exactly 0.5 percentage points above range", overall: 1.5, rate: 2, status: "risk", severity: "medium" },
+  { name: "just below 0.5 percentage points above range", overall: 1.5, rate: 1.999, status: "healthy", severity: "low" },
+] as const) {
+  test(`refund boundary ${scenario.name}`, () => {
+    const catalog = refundCatalog({
+      overall: scenario.overall,
+      stores: [["S001", "上海商场店", scenario.rate]],
+    });
+    const plan = buildInsightAttentionPlan({ intent: "refund_rate", catalog });
+
+    assert.equal(plan.status, scenario.status);
+    assert.equal(plan.findings[0]?.severity, scenario.severity);
+  });
+}
+
+test("refund planning includes scope, daily, and cancellation risk facts", () => {
+  const catalog = refundCatalog({
+    overall: 2.3,
+    cancelOverall: 0.5,
+    daily: [["2025-05-01", 2.8]],
+    stores: [["S001", "上海商场店", 0.8, 2.6]],
+  });
+  const plan = buildInsightAttentionPlan({ intent: "refund_rate", catalog });
+  const sources = plan.findings.map((finding) => sourceOfFinding(catalog, finding.sourceId));
+
+  assert.ok(sources.some((source) => source.metricCode === "refund_rate" && source.attention.subjectKey === "scope"));
+  assert.ok(sources.some((source) => source.metricCode === "daily_refund_rate"));
+  assert.ok(sources.some((source) => source.metricCode === "cancel_rate" && source.subjectIds[0] === "S001"));
+  assert.ok(plan.findings.every((finding) => finding.severity === "high"));
+});
+
+test("healthy refund rates sort descending and break equal rates by stable source ID", () => {
+  const catalog = refundCatalog({
+    overall: 1.6,
+    stores: [
+      ["S003", "C店", 1.7],
+      ["S002", "B店", 1.7],
+      ["S001", "A店", 1.4],
+    ],
+  });
+  const plan = buildInsightAttentionPlan({ intent: "refund_rate", catalog });
+
+  assert.equal(plan.status, "healthy");
+  assert.deepEqual(
+    plan.findings.map((finding) => ({
+      subject: subjectOfFinding(catalog, finding.sourceId),
+      rate: sourceOfFinding(catalog, finding.sourceId).value,
+    })),
+    [
+      { subject: "S002", rate: 1.7 },
+      { subject: "S003", rate: 1.7 },
+      { subject: "scope", rate: 1.6 },
+    ]
+  );
+});
+
+test("anomaly count always outranks extreme z-score and sales-target gap", () => {
+  const catalog = anomalyCatalog([
+    ["S001", "两日异常店", 2, 0, 100, 100],
+    ["S002", "单日极端异常店", 1, 2_001, -1_000_000_000, 100],
+    ["S003", "零异常店", 0, 0, 100, 100],
+  ]);
+  const plan = buildInsightAttentionPlan({ intent: "anomaly_detection", catalog });
+
+  assert.deepEqual(
+    plan.findings.map((finding) => ({
+      subject: subjectOfFinding(catalog, finding.sourceId),
+      severity: finding.severity,
+    })),
+    [
+      { subject: "S001", severity: "high" },
+      { subject: "S002", severity: "medium" },
+    ]
+  );
+});
+
+test("zero anomaly days produce a healthy positive plan", () => {
+  const catalog = anomalyCatalog([["S001", "零异常店", 0, 0, 100, 100]]);
+  const plan = buildInsightAttentionPlan({ intent: "anomaly_detection", catalog });
+
+  assert.equal(plan.status, "healthy");
+  assert.equal(plan.findings[0]?.severity, "positive");
+});
+
+for (const intent of ["channel_mix", "daypart_analysis"] as const) {
+  test(`${intent} includes the leading aggregate share and widest cross-store spread`, () => {
+    const catalog = structureCatalog(intent, {
+      aggregate: [["A", 60], ["B", 40]],
+      stores: [
+        ["S001", "A店", [["A", 90], ["B", 10]]],
+        ["S002", "B店", [["A", 20], ["B", 80]]],
+      ],
+    });
+    const plan = buildInsightAttentionPlan({ intent, catalog });
+    const sources = plan.findings.map((finding) => sourceOfFinding(catalog, finding.sourceId));
+
+    assert.deepEqual(
+      sources.map((source) => [source.metricCode, source.subjectIds]),
+      [
+        [intent === "channel_mix" ? "channel_pct" : "daypart_pct", ["A"]],
+        [intent === "channel_mix" ? "channel_value" : "daypart_value", ["S001", "A"]],
+      ]
+    );
+    assert.ok(plan.findings.every((finding) => finding.severity === "low" && finding.confidence === "needs_verification"));
+  });
+}
+
+test("promotion planning retains contribution, store spread, and promotion discount concentration", () => {
+  const catalog = structureCatalog("promotion_contribution", {
+    promotionDetails: [["会员券", 300], ["满减券", 100]],
+    promotionStores: [
+      ["S001", "A店", 60, 400],
+      ["S002", "B店", 10, 40],
+    ],
+  });
+  const plan = buildInsightAttentionPlan({ intent: "promotion_contribution", catalog });
+  const sources = plan.findings.map((finding) => sourceOfFinding(catalog, finding.sourceId));
+
+  assert.deepEqual(
+    sources.map((source) => [source.metricCode, source.subjectIds]),
+    [
+      ["contribution_rate", []],
+      ["store_contribution_rate", ["S001"]],
+      ["promotion_value", ["会员券"]],
+    ]
+  );
+  assert.ok(plan.findings.every((finding) => finding.severity === "low" && finding.confidence === "needs_verification"));
+  assert.ok(plan.actionContexts.every((context) => context.mode === "verify"));
+});
+
+for (const scenario of [
   {
     name: "target-gap percentage before refund rate",
     stores: [
@@ -467,38 +599,40 @@ function compareCatalog(stores: Record<string, unknown>[]): InsightSourceCatalog
 
 function refundCatalog(input: {
   overall: number;
-  stores: Array<[string, string, number]>;
+  cancelOverall?: number;
+  daily?: Array<[string, number]>;
+  stores: Array<[string, string, number, number?]>;
 }): InsightSourceCatalog {
   return buildInsightSourceCatalog({
     intent: "refund_rate",
     analysisData: {
       refundRate: input.overall,
-      cancelRate: 0,
-      dailyRefund: [],
-      byStore: input.stores.map(([storeId, storeName, refundRate]) => ({
+      cancelRate: input.cancelOverall ?? 0,
+      dailyRefund: (input.daily || []).map(([date, refundRate]) => ({ date, refundRate })),
+      byStore: input.stores.map(([storeId, storeName, refundRate, cancelRate = 0]) => ({
         storeId,
         storeName,
         refundRate,
-        cancelRate: 0,
+        cancelRate,
       })),
     },
   });
 }
 
 function anomalyCatalog(
-  stores: Array<[string, string, number, number]>
+  stores: Array<[string, string, number, number, number?, number?]>
 ): InsightSourceCatalog {
   return buildInsightSourceCatalog({
     intent: "anomaly_detection",
     analysisData: {
-      stores: stores.map(([storeId, storeName, anomalyCount, zScore]) => ({
+      stores: stores.map(([storeId, storeName, anomalyCount, zScore, actualSales = 80, salesTarget = 100]) => ({
         storeId,
         storeName,
         anomalyCount,
         anomalyDays: [{
           date: "2025-05-01",
-          actualSales: 80,
-          salesTarget: 100,
+          actualSales,
+          salesTarget,
           zScore,
         }],
       })),
@@ -507,7 +641,13 @@ function anomalyCatalog(
 }
 
 function structureCatalog(
-  intent: "channel_mix" | "daypart_analysis" | "promotion_contribution"
+  intent: "channel_mix" | "daypart_analysis" | "promotion_contribution",
+  options: {
+    aggregate?: Array<[string, number]>;
+    stores?: Array<[string, string, Array<[string, number]>]>;
+    promotionDetails?: Array<[string, number]>;
+    promotionStores?: Array<[string, string, number, number]>;
+  } = {}
 ): InsightSourceCatalog {
   if (intent === "promotion_contribution") {
     return buildInsightSourceCatalog({
@@ -515,13 +655,13 @@ function structureCatalog(
       analysisData: {
         contributionRate: 35,
         totalDiscount: 500,
-        promotionDetails: [{ promotionName: "会员券", discountAmount: 300 }],
-        byStore: [{
-          storeId: "S001",
-          storeName: "上海商场店",
-          contributionRate: 40,
-          totalDiscount: 250,
-        }],
+        promotionDetails: (options.promotionDetails || [["会员券", 300]]).map(([promotionName, discountAmount]) => ({ promotionName, discountAmount })),
+        byStore: (options.promotionStores || [["S001", "上海商场店", 40, 250]]).map(([storeId, storeName, contributionRate, totalDiscount]) => ({
+          storeId,
+          storeName,
+          contributionRate,
+          totalDiscount,
+        })),
       },
     });
   }
@@ -532,15 +672,12 @@ function structureCatalog(
   return buildInsightSourceCatalog({
     intent,
     analysisData: {
-      [overallKey]: [
-        { [dimension]: "线上", salesPct: 65 },
-        { [dimension]: "线下", salesPct: 35 },
-      ],
-      byStore: [{
-        storeId: "S001",
-        storeName: "上海商场店",
-        [storeKey]: [{ [dimension]: "线上", sales: 650 }],
-      }],
+      [overallKey]: (options.aggregate || [["线上", 65], ["线下", 35]]).map(([name, salesPct]) => ({ [dimension]: name, salesPct })),
+      byStore: (options.stores || [["S001", "上海商场店", [["线上", 650]]]]).map(([storeId, storeName, items]) => ({
+        storeId,
+        storeName,
+        [storeKey]: items.map(([name, sales]) => ({ [dimension]: name, sales })),
+      })),
     },
   });
 }
