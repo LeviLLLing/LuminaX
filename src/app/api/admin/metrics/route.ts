@@ -7,11 +7,21 @@ import {
 import { metricAdminApplication } from "@/modules/admin/metrics/metric-composition";
 import {
   METRIC_CATEGORIES,
+  METRIC_INSIGHT_BENCHMARKS,
+  METRIC_INSIGHT_DIRECTIONS,
   METRIC_SOURCE_TABLES,
   METRIC_UNITS,
 } from "@/modules/admin/metrics/metric-definition";
 
 export const dynamic = "force-dynamic";
+
+const metricInsightPolicySchema = z.object({
+  direction: z.enum(METRIC_INSIGHT_DIRECTIONS),
+  benchmark: z.enum(METRIC_INSIGHT_BENCHMARKS),
+  warningThreshold: z.number().finite().nullable(),
+  criticalThreshold: z.number().finite().nullable(),
+  targetValue: z.number().finite().nullable(),
+}).nullable().optional();
 
 const metricInputSchema = z.object({
   id: z.string().min(1).optional(),
@@ -24,6 +34,7 @@ const metricInputSchema = z.object({
   precision: z.number().int(),
   requestedTables: z.array(z.enum(METRIC_SOURCE_TABLES)),
   sqlTemplate: z.string().default(""),
+  insightPolicy: metricInsightPolicySchema,
 });
 
 const scopeSchema = z.object({

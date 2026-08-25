@@ -1,8 +1,10 @@
 import type {
   CustomMetricDefinition,
+  MetricInsightPolicy,
   MetricQueryResult,
   MetricQueryScope,
 } from "./metric-definition";
+import { normalizeMetricInsightPolicy } from "./metric-definition";
 import type { MetricDefinitionRepository } from "./metric-definition-repository";
 import type { MetricQueryRunner } from "./metric-query-runner";
 
@@ -10,7 +12,7 @@ export interface CustomMetricExecution {
   metric: Pick<
     CustomMetricDefinition,
     "id" | "code" | "name" | "description" | "unit" | "precision"
-  >;
+  > & { insightPolicy?: MetricInsightPolicy | null };
   result: MetricQueryResult;
 }
 
@@ -77,9 +79,24 @@ export class RegisteredCustomMetricRuntime implements CustomMetricRuntime {
         description: metric.description,
         unit: metric.unit,
         precision: metric.precision,
+        insightPolicy: metric.insightPolicy ?? null,
       },
       result,
     };
+  }
+}
+
+export function readMetricInsightPolicy(
+  analysisData: Record<string, unknown>
+): MetricInsightPolicy | null {
+  const metric = analysisData.metric;
+  if (!metric || typeof metric !== "object") return null;
+  const policy = (metric as Record<string, unknown>).insightPolicy;
+  if (!policy || typeof policy !== "object") return null;
+  try {
+    return normalizeMetricInsightPolicy(policy as MetricInsightPolicy);
+  } catch {
+    return null;
   }
 }
 

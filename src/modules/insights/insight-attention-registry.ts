@@ -1,4 +1,5 @@
 import type { AnalysisIntent } from "@/modules/domain/analysis-types";
+import type { MetricInsightPolicy } from "@/modules/admin/metrics/metric-definition";
 import { InsightValidationError } from "./insight-validator";
 import type { InsightAttentionPlan } from "./insight-attention-plan";
 import {
@@ -29,10 +30,13 @@ export const insightAttentionStrategies = {
 export function buildInsightAttentionPlan(input: {
   intent: AnalysisIntent;
   catalog: InsightSourceCatalog;
-  customPolicy?: unknown;
+  customPolicy?: MetricInsightPolicy | null;
 }): InsightAttentionPlan {
   if (input.intent === "irrelevant") {
     throw new InsightValidationError("INSUFFICIENT_SOURCE_DATA");
   }
-  return insightAttentionStrategies[input.intent].build(input.catalog);
+  return insightAttentionStrategies[input.intent].build(
+    input.catalog,
+    input.customPolicy ?? null
+  );
 }

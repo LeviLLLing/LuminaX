@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Rocket,
   Save,
+  Scale,
   Search,
   ShieldCheck,
   Sparkles,
@@ -66,10 +67,13 @@ import {
 } from "@/components/ui/tooltip";
 import {
   METRIC_CATEGORIES,
+  METRIC_INSIGHT_BENCHMARKS,
+  METRIC_INSIGHT_DIRECTIONS,
   METRIC_SOURCE_TABLES,
   METRIC_UNITS,
   type CustomMetricDefinition,
   type MetricDefinitionInput,
+  type MetricInsightPolicy,
   type MetricQueryResult,
   type MetricSqlValidation,
   type RegisteredMetricDefinition,
@@ -94,6 +98,20 @@ const UNIT_LABELS: Record<(typeof METRIC_UNITS)[number], string> = {
   currency: "金额",
   percentage: "百分比",
   count: "计数",
+};
+
+const INSIGHT_DIRECTION_LABELS: Record<(typeof METRIC_INSIGHT_DIRECTIONS)[number], string> = {
+  higher_is_better: "数值越高越好",
+  lower_is_better: "数值越低越好",
+  target_is_best: "越接近目标越好",
+  neutral: "中性，仅核查",
+};
+
+const INSIGHT_BENCHMARK_LABELS: Record<(typeof METRIC_INSIGHT_BENCHMARKS)[number], string> = {
+  absolute: "绝对阈值",
+  target: "目标值偏离",
+  scoped_average: "当前范围平均",
+  none: "不设基准",
 };
 
 const SOURCE_TABLE_LABELS: Record<(typeof METRIC_SOURCE_TABLES)[number], string> = {
@@ -190,6 +208,7 @@ export function MetricRegistryPanel() {
       precision: metric.precision,
       requestedTables: metric.requestedTables,
       sqlTemplate: metric.sqlTemplate,
+      insightPolicy: metric.insightPolicy ?? null,
     });
     setAliasText(metric.aliases.join("、"));
     setValidation(
@@ -530,6 +549,11 @@ export function MetricRegistryPanel() {
                 <Textarea aria-label="计算口径" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="min-h-28 resize-y" />
               </Field>
 
+              <MetricInsightPolicyFields
+                value={form.insightPolicy ?? null}
+                onChange={(insightPolicy) => setForm({ ...form, insightPolicy })}
+              />
+
               <div>
                 <Label className="mb-3">数据表</Label>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
@@ -714,7 +738,139 @@ function createEmptyMetric(): MetricDefinitionInput {
     precision: 2,
     requestedTables: ["store_sales_daily"],
     sqlTemplate: "",
+    insightPolicy: null,
   };
+}
+
+function MetricInsightPolicyFields({
+  value,
+  onChange,
+}: {
+  value: MetricInsightPolicy | null;
+  onChange: (value: MetricInsightPolicy | null) => void;
+}) {
+  const targetEnabled = Boolean(
+    value &&
+    (value.direction === "target_is_best" || value.benchmark === "target")
+  );
+  return (
+    <section className="border-t border-zinc-200 pt-5" aria-labelledby="metric-insight-policy-label">
+      <div className="flex min-h-10 items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <Scale aria-hidden="true" className="size-4 shrink-0 text-zinc-500" />
+          <Label id="metric-insight-policy-label" htmlFor="metric-insight-policy">
+            洞察判断
+          </Label>
+        </div>
+        <Switch
+          id="metric-insight-policy"
+          checked={value !== null}
+          onCheckedChange={(checked) => onChange(checked ? createNeutralInsightPolicy() : null)}
+          aria-label="启用洞察判断"
+        />
+      </div>
+
+      {value && (
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+          <Field label="判断方向">
+            <Select
+              value={value.direction}
+              onValueChange={(direction) => onChange({
+                ...value,
+                direction: direction as MetricInsightPolicy["direction"],
+              })}
+            >
+              <SelectTrigger aria-label="洞察判断方向" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {METRIC_INSIGHT_DIRECTIONS.map((direction) => (
+                  <SelectItem key={direction} value={direction}>
+                    {INSIGHT_DIRECTION_LABELS[direction]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="比较基准">
+            <Select
+              value={value.benchmark}
+              onValueChange={(benchmark) => onChange({
+                ...value,
+                benchmark: benchmark as MetricInsightPolicy["benchmark"],
+              })}
+            >
+              <SelectTrigger aria-label="洞察比较基准" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {METRIC_INSIGHT_BENCHMARKS.map((benchmark) => (
+                  <SelectItem key={benchmark} value={benchmark}>
+                    {INSIGHT_BENCHMARK_LABELS[benchmark]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <PolicyNumberField
+            label="警戒阈值"
+            value={value.warningThreshold}
+            onChange={(warningThreshold) => onChange({ ...value, warningThreshold })}
+          />
+          <PolicyNumberField
+            label="严重阈值"
+            value={value.criticalThreshold}
+            onChange={(criticalThreshold) => onChange({ ...value, criticalThreshold })}
+          />
+          <PolicyNumberField
+            label="目标值"
+            value={value.targetValue}
+            disabled={!targetEnabled}
+            onChange={(targetValue) => onChange({ ...value, targetValue })}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PolicyNumberField({
+  label,
+  value,
+  disabled = false,
+  onChange,
+}: {
+  label: string;
+  value: number | null;
+  disabled?: boolean;
+  onChange: (value: number | null) => void;
+}) {
+  return (
+    <Field label={label}>
+      <Input
+        aria-label={label}
+        type="number"
+        step="any"
+        value={value ?? ""}
+        disabled={disabled}
+        onChange={(event) => onChange(parseNullableNumber(event.target.value))}
+      />
+    </Field>
+  );
+}
+
+function createNeutralInsightPolicy(): MetricInsightPolicy {
+  return {
+    direction: "neutral",
+    benchmark: "none",
+    warningThreshold: null,
+    criticalThreshold: null,
+    targetValue: null,
+  };
+}
+
+function parseNullableNumber(value: string): number | null {
+  return value === "" ? null : Number(value);
 }
 
 async function adminRequest<T = Record<string, unknown>>(body?: Record<string, unknown>): Promise<T> {

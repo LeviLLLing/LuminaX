@@ -4,6 +4,7 @@ import {
   type InsightAttentionCandidate,
   type InsightAttentionPlan,
 } from "./insight-attention-plan";
+import type { MetricInsightPolicy } from "@/modules/admin/metrics/metric-definition";
 import type { InsightAttentionStrategy } from "./insight-performance-strategies";
 import type { InsightSeverity } from "./insight-types";
 import type {
@@ -126,7 +127,10 @@ function buildReportPlan(catalog: InsightSourceCatalog): InsightAttentionPlan {
   );
 }
 
-function buildCustomMetricPlan(catalog: InsightSourceCatalog): InsightAttentionPlan {
+function buildCustomMetricPlan(
+  catalog: InsightSourceCatalog,
+  policy: MetricInsightPolicy | null = null
+): InsightAttentionPlan {
   const noData = catalog.findingSources.find((source) => {
     return source.metricCode === "data_availability" && source.value === 0;
   });
@@ -139,13 +143,93 @@ function buildCustomMetricPlan(catalog: InsightSourceCatalog): InsightAttentionP
     );
   }
 
+  const sources = catalog.findingSources.filter(
+    (source) => source.metricCode !== "data_availability"
+  );
+  if (!policy || policy.direction === "neutral" || policy.benchmark === "none") {
+    const selected = selectDiverseCandidates(
+      sources.map((source) => candidate(source, "low", 1, "primary", "needs_verification")),
+      { maxFindings: 3, minFindings: 1 }
+    );
+    return planFromCandidates(catalog, selected, selected.length > 0 ? "healthy" : "no_data", "verify");
+  }
+
+  const scopedAverage = average(sources.map((source) => source.value));
+  const candidates = sources.map((source) => {
+    const riskValue = customMetricRiskValue(source.value, policy, scopedAverage);
+    const severity = customMetricSeverity(riskValue, policy);
+    return candidate(
+      source,
+      severity,
+      severity === "high" ? 3 : severity === "medium" ? 2 : 1,
+      "primary"
+    );
+  });
+  const hasRisk = candidates.some(
+    (item) => item.severity === "high" || item.severity === "medium"
+  );
   const selected = selectDiverseCandidates(
-    catalog.findingSources
-      .filter((source) => source.metricCode !== "data_availability")
-      .map((source) => candidate(source, "low", 1, "primary", "needs_verification")),
+    hasRisk ? candidates : candidates.filter((item) => item.severity === "positive"),
     { maxFindings: 3, minFindings: 1 }
   );
-  return planFromCandidates(catalog, selected, selected.length > 0 ? "healthy" : "no_data", "verify");
+  return planFromCandidates(
+    catalog,
+    selected,
+    hasRisk ? "risk" : selected.length > 0 ? "healthy" : "no_data",
+    hasRisk ? "improve" : "monitor"
+  );
+}
+
+function customMetricRiskValue(
+  value: number,
+  policy: MetricInsightPolicy,
+  scopedAverage: number | null
+): number {
+  if (policy.direction === "target_is_best") {
+    const target = policy.targetValue ?? 0;
+    const deviation = Math.abs(value - target);
+    return policy.benchmark === "absolute"
+      ? deviation
+      : relativeDeviation(deviation, target);
+  }
+  if (policy.benchmark === "absolute") return value;
+
+  const benchmark = policy.benchmark === "target"
+    ? policy.targetValue
+    : scopedAverage;
+  if (benchmark === null) return 0;
+  const directionalGap = policy.direction === "higher_is_better"
+    ? benchmark - value
+    : value - benchmark;
+  return relativeDeviation(Math.max(0, directionalGap), benchmark);
+}
+
+function customMetricSeverity(
+  riskValue: number,
+  policy: MetricInsightPolicy
+): InsightSeverity {
+  const critical = policy.criticalThreshold;
+  const warning = policy.warningThreshold;
+  const lowerValuesAreRisk =
+    policy.benchmark === "absolute" &&
+    policy.direction === "higher_is_better";
+  const crosses = (threshold: number) => lowerValuesAreRisk
+    ? riskValue < threshold
+    : riskValue > threshold;
+  if (critical !== null && crosses(critical)) return "high";
+  if (warning !== null && crosses(warning)) return "medium";
+  return "positive";
+}
+
+function relativeDeviation(deviation: number, benchmark: number): number {
+  if (benchmark === 0) return deviation === 0 ? 0 : Number.POSITIVE_INFINITY;
+  return deviation / Math.abs(benchmark) * 100;
+}
+
+function average(values: number[]): number | null {
+  return values.length > 0
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
+    : null;
 }
 
 function largestMagnitude(sources: InsightFindingSource[]): InsightFindingSource {

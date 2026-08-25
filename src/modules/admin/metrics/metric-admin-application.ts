@@ -4,6 +4,7 @@ import {
   METRIC_CATEGORIES,
   METRIC_SOURCE_TABLES,
   METRIC_UNITS,
+  normalizeMetricInsightPolicy,
   type CustomMetricDefinition,
   type MetricDefinitionInput,
   type MetricQueryResult,
@@ -124,8 +125,15 @@ export function createMetricAdminApplication(
 
       const timestamp = now().toISOString();
       const sqlChanged = existing?.sqlTemplate !== input.sqlTemplate;
+      const insightPolicy = Object.prototype.hasOwnProperty.call(
+        rawInput,
+        "insightPolicy"
+      )
+        ? input.insightPolicy ?? null
+        : existing?.insightPolicy ?? null;
       const metric: CustomMetricDefinition = {
         ...input,
+        insightPolicy,
         id: existing?.id || input.id || randomUUID(),
         origin: "custom",
         status: sqlChanged ? "draft" : existing?.status || "draft",
@@ -250,6 +258,17 @@ function normalizeInput(
     throw new MetricAdminError("INVALID_INPUT", "发布前必须生成或填写 SQL。");
   }
 
+  let insightPolicy;
+  try {
+    insightPolicy = normalizeMetricInsightPolicy(input.insightPolicy);
+  } catch (error) {
+    throw new MetricAdminError(
+      "INVALID_INPUT",
+      error instanceof Error ? error.message : "洞察判断策略无效。",
+      { cause: error }
+    );
+  }
+
   return {
     id: input.id,
     code,
@@ -261,6 +280,9 @@ function normalizeInput(
     precision: input.precision,
     requestedTables: [...new Set(input.requestedTables)],
     sqlTemplate,
+    ...(Object.prototype.hasOwnProperty.call(input, "insightPolicy")
+      ? { insightPolicy }
+      : {}),
   };
 }
 

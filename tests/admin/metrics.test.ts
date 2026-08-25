@@ -156,6 +156,92 @@ test("metric admin application publishes only after validation and test", async 
   assert.equal(disabled.status, "disabled");
 });
 
+test("old custom metrics load with a neutral insight policy", async () => {
+  const repository = new InMemoryMetricRepository();
+  const metric = createPublishedMetric();
+  delete (metric as Partial<typeof metric>).insightPolicy;
+
+  await repository.save(metric);
+
+  assert.equal((await repository.findById(metric.id))?.insightPolicy ?? null, null);
+});
+
+test("metric publication rejects invalid policy thresholds", async () => {
+  const repository = new InMemoryMetricRepository();
+  const application = createMetricAdminApplication(
+    repository,
+    {
+      async run() {
+        return { rows: [{ metric_value: 1 }], rowCount: 1, columns: ["metric_value"] };
+      },
+    },
+    {
+      async generate() {
+        return { sqlTemplate: SAFE_CUSTOM_METRIC_SQL, explanation: "", assumptions: [] };
+      },
+    }
+  );
+
+  await assert.rejects(
+    application.saveDraft({
+      code: "custom_sales_total",
+      name: "自定义销售额",
+      description: "统计范围内实际销售额合计",
+      aliases: ["销售总额"],
+      category: "sales",
+      unit: "currency",
+      precision: 2,
+      requestedTables: ["store_sales_daily"],
+      sqlTemplate: SAFE_CUSTOM_METRIC_SQL,
+      insightPolicy: {
+        direction: "lower_is_better",
+        benchmark: "absolute",
+        warningThreshold: 3,
+        criticalThreshold: 2,
+        targetValue: null,
+      },
+    }),
+    /严重阈值/
+  );
+});
+
+test("custom metric policy survives SQL changes and reaches runtime metadata", async () => {
+  const repository = new InMemoryMetricRepository();
+  const metric = createPublishedMetric();
+  metric.insightPolicy = {
+    direction: "lower_is_better",
+    benchmark: "absolute",
+    warningThreshold: 2,
+    criticalThreshold: 3,
+    targetValue: null,
+  };
+  await repository.save(metric);
+  const application = createMetricAdminApplication(
+    repository,
+    { async run() { return { rows: [], rowCount: 0, columns: [] }; } },
+    { async generate() { return { sqlTemplate: "", explanation: "", assumptions: [] }; } }
+  );
+
+  const saved = await application.saveDraft({
+    ...metric,
+    sqlTemplate: `${metric.sqlTemplate}\n-- changed`,
+  });
+  const runtime = new RegisteredCustomMetricRuntime(repository, {
+    async run() {
+      return { rows: [{ metric_value: 4 }], rowCount: 1, columns: ["metric_value"] };
+    },
+  });
+  await repository.save({ ...saved, status: "published" });
+  const execution = await runtime.execute(metric.id, {
+    storeIds: ["S001"],
+    startDate: "2025-05-01",
+    endDate: "2025-05-14",
+  });
+
+  assert.deepEqual(saved.insightPolicy, metric.insightPolicy);
+  assert.deepEqual(execution.metric.insightPolicy, metric.insightPolicy);
+});
+
 test("custom metric permissions are derived from SQL source columns", () => {
   const requirements = getCustomMetricAccessRequirements(
     createPublishedMetric()

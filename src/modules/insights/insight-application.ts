@@ -4,6 +4,7 @@ import {
   type AccessControl,
 } from "@/modules/admin/permissions/access-control";
 import type { BusinessAnalysisContext } from "@/modules/agents/business/business-agent";
+import { readMetricInsightPolicy } from "@/modules/admin/metrics/custom-metric-runtime";
 import {
   InsightGenerationGuard,
   type InsightGenerationToken,
@@ -121,9 +122,13 @@ export function createInsightApplication({
         intent: analysis.intent,
         analysisData: analysis.analysisData,
       });
+      const customPolicy = analysis.intent === "custom_metric"
+        ? readMetricInsightPolicy(analysis.analysisData)
+        : null;
       const plan = buildInsightAttentionPlan({
         intent: analysis.intent,
         catalog,
+        customPolicy,
       });
       const draft = await composer.compose({
         question: analysis.question,

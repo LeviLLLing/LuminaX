@@ -1,4 +1,5 @@
 import type { AnalysisIntent } from "@/modules/domain/analysis-types";
+import type { MetricInsightPolicy } from "@/modules/admin/metrics/metric-definition";
 import {
   selectDiverseCandidates,
   type InsightActionContext,
@@ -12,7 +13,10 @@ import type {
 } from "./insight-source-catalog";
 
 export interface InsightAttentionStrategy {
-  build(catalog: InsightSourceCatalog): InsightAttentionPlan;
+  build(
+    catalog: InsightSourceCatalog,
+    customPolicy?: MetricInsightPolicy | null
+  ): InsightAttentionPlan;
 }
 
 export const performanceAttentionStrategies: Partial<

@@ -149,6 +149,123 @@ test("irrelevant intent rejects before the exhaustive strategy registry lookup",
   );
 });
 
+test("lower-is-better custom policy is high above critical and medium above warning", () => {
+  const policy = {
+    direction: "lower_is_better",
+    benchmark: "absolute",
+    warningThreshold: 2,
+    criticalThreshold: 3,
+    targetValue: null,
+  } as const;
+
+  const high = buildInsightAttentionPlan({
+    intent: "custom_metric",
+    catalog: customCatalog(4),
+    customPolicy: policy,
+  });
+  const medium = buildInsightAttentionPlan({
+    intent: "custom_metric",
+    catalog: customCatalog(2.5),
+    customPolicy: policy,
+  });
+
+  assert.equal(high.status, "risk");
+  assert.equal(high.findings[0]?.severity, "high");
+  assert.equal(medium.status, "risk");
+  assert.equal(medium.findings[0]?.severity, "medium");
+});
+
+test("higher-is-better custom policy is high below critical", () => {
+  const plan = buildInsightAttentionPlan({
+    intent: "custom_metric",
+    catalog: customCatalog(70),
+    customPolicy: {
+      direction: "higher_is_better",
+      benchmark: "absolute",
+      warningThreshold: 90,
+      criticalThreshold: 80,
+      targetValue: null,
+    },
+  });
+
+  assert.equal(plan.status, "risk");
+  assert.equal(plan.findings[0]?.severity, "high");
+});
+
+test("target custom policy uses absolute deviation", () => {
+  const plan = buildInsightAttentionPlan({
+    intent: "custom_metric",
+    catalog: customCatalog(108),
+    customPolicy: {
+      direction: "target_is_best",
+      benchmark: "absolute",
+      warningThreshold: 5,
+      criticalThreshold: 10,
+      targetValue: 100,
+    },
+  });
+
+  assert.equal(plan.status, "risk");
+  assert.equal(plan.findings[0]?.severity, "medium");
+});
+
+test("missing and neutral custom policies retain neutral verify behavior", () => {
+  const missing = buildInsightAttentionPlan({
+    intent: "custom_metric",
+    catalog: customCatalog(1_000_000),
+  });
+  const neutral = buildInsightAttentionPlan({
+    intent: "custom_metric",
+    catalog: customCatalog(1_000_000),
+    customPolicy: {
+      direction: "neutral",
+      benchmark: "none",
+      warningThreshold: 1,
+      criticalThreshold: 2,
+      targetValue: null,
+    },
+  });
+
+  for (const plan of [missing, neutral]) {
+    assert.equal(plan.status, "healthy");
+    assert.ok(plan.findings.every((finding) => finding.severity === "low"));
+    assert.ok(plan.actionContexts.every((context) => context.mode === "verify"));
+  }
+});
+
+test("custom policy metadata is not promoted into SQL-backed findings", () => {
+  const catalog = buildInsightSourceCatalog({
+    intent: "custom_metric",
+    analysisData: {
+      metric: {
+        id: "custom-metric-id",
+        code: "custom_sales_total",
+        name: "自定义销售额",
+        description: "统计范围内实际销售额合计",
+        unit: "currency",
+        precision: 2,
+        insightPolicy: {
+          direction: "lower_is_better",
+          benchmark: "absolute",
+          warningThreshold: 2,
+          criticalThreshold: 3,
+          targetValue: null,
+        },
+      },
+      result: {
+        rows: [{ metric_value: 4 }],
+        rowCount: 1,
+        columns: ["metric_value"],
+      },
+    },
+  });
+
+  assert.deepEqual(
+    catalog.findingSources.map((source) => [source.metricCode, source.value]),
+    [["custom_metric_value", 4]]
+  );
+});
+
 test("achievement strategy ranks actual underperformers independent of row order", () => {
   const catalog = catalogForRates([
     ["S001", "上海商场店", 102],

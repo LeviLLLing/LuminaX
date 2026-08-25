@@ -107,6 +107,7 @@ const genericMetadataKeys = new Set([
   "code",
   "description",
   "precision",
+  "insightPolicy",
   "rowCount",
   "storeId",
   "storeName",
