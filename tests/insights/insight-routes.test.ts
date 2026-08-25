@@ -3,8 +3,8 @@ import test from "node:test";
 import { NextRequest } from "next/server";
 import { DataAccessDeniedError } from "../../src/modules/admin/permissions/access-control";
 import type { AuthenticatedUser } from "../../src/modules/auth/auth-types";
-import { createGetLatestInsightHandler } from "../../src/app/api/insights/latest/route";
-import { createPatchInsightActionHandler } from "../../src/app/api/insights/latest/actions/[actionId]/route";
+import { createGetLatestInsightHandler } from "../../src/app/api/insights/latest/handler";
+import { createPatchInsightActionHandler } from "../../src/app/api/insights/latest/actions/[actionId]/handler";
 import {
   InsightConflictError,
   InsightNotFoundError,

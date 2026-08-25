@@ -13,10 +13,10 @@ import { ChatApplicationError } from "../../src/modules/chat/chat-application";
 import { handleChatHttpRequest } from "../../src/modules/chat/chat-http-adapter";
 import { streamChatResponse } from "../../src/modules/chat/sse-response";
 import { DataAccessDeniedError } from "../../src/modules/admin/permissions/access-control";
-import { createPostWeeklyReportHandler } from "../../src/app/api/reports/weekly/route";
+import { createPostWeeklyReportHandler } from "../../src/app/api/reports/weekly/handler";
 import type { AuthenticatedUser } from "../../src/modules/auth/auth-types";
-import { createGetLatestInsightHandler } from "../../src/app/api/insights/latest/route";
-import { createPatchInsightActionHandler } from "../../src/app/api/insights/latest/actions/[actionId]/route";
+import { createGetLatestInsightHandler } from "../../src/app/api/insights/latest/handler";
+import { createPatchInsightActionHandler } from "../../src/app/api/insights/latest/actions/[actionId]/handler";
 import { toInsightSnapshotDto, type InsightSnapshot } from "../../src/modules/insights/insight-types";
 
 test("public chat SSE wire format remains stable", async () => {
@@ -293,7 +293,7 @@ test("weekly report API enforces authentication, payload and permission contract
 });
 
 test("latest insight API excludes server-only identity and authorization fields", async () => {
-  const snapshot: InsightSnapshot = {
+  const snapshot = {
     id: "insight-contract",
     userId: "private-user",
     sourceQuestion: "Compare stores",
@@ -308,6 +308,11 @@ test("latest insight API excludes server-only identity and authorization fields"
     sourceFingerprint: "private-fingerprint",
     createdAt: "2026-08-13T00:00:00.000Z",
     updatedAt: "2026-08-13T00:00:00.000Z",
+    attentionPlan: { status: "risk", findingIds: ["internal-finding"] },
+    customPolicy: { direction: "lower_is_better", criticalThreshold: 3 },
+  } as InsightSnapshot & {
+    attentionPlan: Record<string, unknown>;
+    customPolicy: Record<string, unknown>;
   };
   const response = await createGetLatestInsightHandler({
     authenticate: async () => ({ id: "private-user", username: "user", displayName: "User", role: "analyst" }),
@@ -317,6 +322,8 @@ test("latest insight API excludes server-only identity and authorization fields"
   assert.equal("userId" in body.insight, false);
   assert.equal("accessRequirements" in body.insight, false);
   assert.equal("sourceFingerprint" in body.insight, false);
+  assert.equal("attentionPlan" in body.insight, false);
+  assert.equal("customPolicy" in body.insight, false);
 });
 
 test("latest insight action API preserves authenticated public contract", async () => {

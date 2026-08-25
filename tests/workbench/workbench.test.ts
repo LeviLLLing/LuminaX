@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { NextRequest } from "next/server";
-import { createGetWorkbenchContextHandler } from "../../src/app/api/workbench/context/route";
+import { createGetWorkbenchContextHandler } from "../../src/app/api/workbench/context/handler";
 import { SYSTEM_METRIC_DEFINITIONS } from "../../src/modules/admin/metrics/system-metric-catalog";
 import { DataAccessDeniedError } from "../../src/modules/admin/permissions/access-control";
 import type { PermissionUser } from "../../src/modules/admin/permissions/permission-types";
