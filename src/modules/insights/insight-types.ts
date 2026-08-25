@@ -149,6 +149,17 @@ export interface InsightModelDraft {
 }
 
 export function toInsightSnapshotDto(snapshot: InsightSnapshot): InsightSnapshotDto {
-  const { userId: _userId, accessRequirements: _accessRequirements, sourceFingerprint: _sourceFingerprint, ...clientFields } = snapshot;
-  return structuredClone(clientFields);
+  return structuredClone({
+    id: snapshot.id,
+    sourceQuestion: snapshot.sourceQuestion,
+    sourceIntent: snapshot.sourceIntent,
+    scope: snapshot.scope,
+    headline: snapshot.headline,
+    findings: snapshot.findings,
+    evidence: snapshot.evidence,
+    verificationItems: snapshot.verificationItems,
+    actions: snapshot.actions,
+    createdAt: snapshot.createdAt,
+    updatedAt: snapshot.updatedAt,
+  });
 }

@@ -12,9 +12,13 @@ import {
 } from "../../src/modules/chat/chat-stream-client";
 import {
   StaleInsightGenerationError,
+  createInsightApplication as createRealInsightApplication,
   type InsightApplication,
 } from "../../src/modules/insights/insight-application";
+import { InsightGenerationGuard } from "../../src/modules/insights/insight-generation-guard";
+import { createGroundedInsightDraft } from "../../src/modules/insights/insight-composer";
 import type { InsightSnapshot } from "../../src/modules/insights/insight-types";
+import type { LatestInsightRepository } from "../../src/modules/insights/latest-insight-repository";
 
 test("chat application routes governance rejection and approved handoff", async () => {
   let businessCalls = 0;
@@ -333,6 +337,70 @@ test("a successful achievement-rate analysis always refreshes the insight", asyn
   assert.deepEqual(events, ["generating", "updated"]);
 });
 
+test("all-store sales keeps the full answer and prioritizes actual underperformers", async () => {
+  let saved: InsightSnapshot | null = null;
+  const repository: LatestInsightRepository = {
+    async findByUserId() { return saved && structuredClone(saved); },
+    async claimGeneration() { return true; },
+    async replaceForUser(snapshot) {
+      saved = structuredClone(snapshot);
+      return structuredClone(snapshot);
+    },
+    async updateActionState() {
+      if (!saved) throw new Error("missing insight");
+      return structuredClone(saved);
+    },
+  };
+  const realInsightApplication = createRealInsightApplication({
+    repository,
+    guard: new InsightGenerationGuard(),
+    composer: {
+      async compose(input) {
+        return createGroundedInsightDraft(input.catalog, input.plan);
+      },
+    },
+    accessControl: {
+      async authorizeScope(input) {
+        return { storeIds: [...input.requestedStoreIds] };
+      },
+    },
+    listStoreIds: async () => ["S001", "S004", "S005"],
+  });
+  const events: string[] = [];
+  const application = createChatApplication({
+    governanceAgent: allowGovernance(),
+    businessAgent: hardCaseBusinessAgent(),
+    insightApplication: realInsightApplication,
+  });
+
+  const result = await application.execute({
+    userId: "u1",
+    question: "分析2025年5月1日至2025年5月7日所有门店的销售情况",
+    stream: {
+      emitStatus() {},
+      emitReasoning() {},
+      emitContent() {},
+      emitInsight(event) { events.push(event.status); },
+    },
+  });
+
+  assert.equal(result.content, "完整业务分析：上海商场店102%，地铁站店82%，社区中心店94%。");
+  assert.deepEqual(events, ["generating", "updated"]);
+  const persisted = await repository.findByUserId("u1");
+  assert.ok(persisted);
+  const riskFindings = persisted.findings.filter(
+    (finding) => finding.severity === "high" || finding.severity === "medium"
+  );
+  assert.deepEqual(
+    riskFindings.slice(0, 2).map((finding) => finding.subjectIds[0]),
+    ["S004", "S005"]
+  );
+  assert.equal(
+    riskFindings.some((finding) => finding.subjectIds.includes("S001")),
+    false
+  );
+});
+
 function allowGovernance(): GovernanceAgent {
   return { async review({ sessionId, question }) { return { decision: "allow", category: "allowed", reason: "ok", handoff: { sessionId, question } }; } };
 }
@@ -349,6 +417,41 @@ function projectingBusinessAgent(intent: "compare" | "achievement_rate" = "compa
       const override = await request.onAnalysisReady?.(analysis);
       if (!override) request.stream?.emitContent("完整业务分析正文");
       return { intentResult: { intent, storeIds: ["S001"], startDate: null, endDate: null, relevant: true, outOfScope: false }, content: override?.content || "完整业务分析正文", storeIds: ["S001"], startDate: analysis.startDate, endDate: analysis.endDate };
+    },
+  };
+}
+
+function hardCaseBusinessAgent(): BusinessAgent {
+  return {
+    async execute(request) {
+      const content = "完整业务分析：上海商场店102%，地铁站店82%，社区中心店94%。";
+      const analysis = {
+        question: request.question,
+        intent: "compare" as const,
+        analysisData: {
+          stores: [
+            { storeId: "S001", storeName: "上海商场店", totalSales: 102, totalTarget: 100, achievementRate: 102, totalOrders: 10, avgOrderValue: 10.2, totalRefund: 1, refundRate: 1 },
+            { storeId: "S004", storeName: "地铁站店", totalSales: 82, totalTarget: 100, achievementRate: 82, totalOrders: 8, avgOrderValue: 10.25, totalRefund: 1, refundRate: 1.2 },
+            { storeId: "S005", storeName: "社区中心店", totalSales: 94, totalTarget: 100, achievementRate: 94, totalOrders: 9, avgOrderValue: 10.44, totalRefund: 1, refundRate: 1.1 },
+          ],
+        },
+        attributionNarrative: null,
+        fallbackContent: content,
+        storeIds: ["S001", "S004", "S005"],
+        startDate: "2025-05-01",
+        endDate: "2025-05-07",
+        accessRequirements: [{ tableName: "store_sales_daily", columns: ["store_id"] }],
+      };
+      await request.onAnalysisPlanned?.("compare");
+      await request.onAnalysisReady?.(analysis);
+      request.stream?.emitContent(content);
+      return {
+        intentResult: { intent: "compare", storeIds: analysis.storeIds, startDate: analysis.startDate, endDate: analysis.endDate, relevant: true, outOfScope: false },
+        content,
+        storeIds: analysis.storeIds,
+        startDate: analysis.startDate,
+        endDate: analysis.endDate,
+      };
     },
   };
 }
