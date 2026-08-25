@@ -59,7 +59,7 @@
 - Produces: `InsightAttentionCandidate`, `InsightActionContext`, and `InsightAttentionPlan`.
 - Produces: `selectDiverseCandidates(candidates, { maxFindings, minFindings }): InsightAttentionCandidate[]`.
 
-- [ ] **Step 1: Write failing subject-diversity tests**
+- [x] **Step 1: Write failing subject-diversity tests**
 
 ```ts
 test("primary findings cover distinct subjects before support facts", () => {
@@ -83,13 +83,13 @@ test("healthy plans do not invent risk findings to reach three items", () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify missing module failure**
+- [x] **Step 2: Run the focused test and verify missing module failure**
 
 Run: `pnpm exec tsx --test tests/insights/insight-attention.test.ts`
 
 Expected: FAIL because the attention plan module does not exist.
 
-- [ ] **Step 3: Implement the domain types and two-pass selector**
+- [x] **Step 3: Implement the domain types and two-pass selector**
 
 ```ts
 export interface InsightAttentionCandidate {
@@ -120,7 +120,7 @@ export interface InsightAttentionPlan {
 
 Sort candidates by descending score and stable `sourceId`; select `primary` candidates with distinct `subjectKey` first, then support candidates until `maxFindings`. Never add candidates solely to satisfy three findings.
 
-- [ ] **Step 4: Include and run the new test module**
+- [x] **Step 4: Include and run the new test module**
 
 Add `import "./insights/insight-attention.test";` to `tests/module-interfaces.test.ts`.
 
@@ -128,7 +128,7 @@ Run: `pnpm exec tsx --test tests/insights/insight-attention.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the attention domain**
+- [x] **Step 5: Commit the attention domain**
 
 ```bash
 git add src/modules/insights/insight-attention-plan.ts tests/insights/insight-attention.test.ts tests/module-interfaces.test.ts
@@ -146,7 +146,7 @@ git commit -m "feat: add deterministic insight attention plans"
 - Produces: dedicated `buildAchievementRate` and `buildReport` catalog builders.
 - Preserves: `buildInsightSourceCatalog({ intent, analysisData }): InsightSourceCatalog`.
 
-- [ ] **Step 1: Add failing complete-catalog tests for the reported bug**
+- [x] **Step 1: Add failing complete-catalog tests for the reported bug**
 
 ```ts
 test("achievement catalog includes every store instead of the first five values", () => {
@@ -169,13 +169,13 @@ test("achievement catalog includes every store instead of the first five values"
 
 Add a report fixture with `summary`, `storeRanking`, `dailyTrend`, and breakdowns; assert its catalog includes overall achievement, every store achievement, refund rate, and anomaly dates rather than generic first fields.
 
-- [ ] **Step 2: Run generation tests and verify achievement/report failures**
+- [x] **Step 2: Run generation tests and verify achievement/report failures**
 
 Run: `pnpm exec tsx --test tests/insights/insight-generation.test.ts`
 
 Expected: FAIL because `achievement_rate` and `report` still use `buildGeneric`.
 
-- [ ] **Step 3: Add attention metadata and dedicated builders**
+- [x] **Step 3: Add attention metadata and dedicated builders**
 
 ```ts
 export interface InsightSourceAttentionMetadata {
@@ -191,17 +191,17 @@ export interface InsightSourceAttentionMetadata {
 
 Extend `CatalogBuilder.source` with the metadata argument. For achievement sources, set each store rate as `primary/achievement`, gap and sales/target as `support`, and include cross-store rate plus sales-versus-target evidence. For report, expose overall achievement/refund, all store achievements, daily anomaly facts, and structure evidence.
 
-- [ ] **Step 4: Annotate existing intent builders**
+- [x] **Step 4: Annotate existing intent builders**
 
 Assign stable `subjectKey` values from the first store/date/dimension subject ID. Mark rates/trends/anomaly counts as primary and raw values/targets as support. Mark channel/daypart/promotion values as `structure`; attribution contributions as `contribution`; record count as `data_availability`.
 
-- [ ] **Step 5: Run catalog tests and type checking**
+- [x] **Step 5: Run catalog tests and type checking**
 
 Run: `pnpm exec tsx --test tests/insights/insight-generation.test.ts && pnpm run ts-check`
 
 Expected: PASS; source IDs and public evidence DTOs remain deterministic.
 
-- [ ] **Step 6: Commit complete catalogs**
+- [x] **Step 6: Commit complete catalogs**
 
 ```bash
 git add src/modules/insights/insight-source-catalog.ts tests/insights/insight-generation.test.ts
@@ -220,7 +220,7 @@ git commit -m "fix: build complete insight source catalogs"
 - Produces: `buildInsightAttentionPlan({ intent, catalog, customPolicy? }): InsightAttentionPlan`.
 - Handles: `achievement_rate`, `compare`, `order_trend`, and `aov_trend`.
 
-- [ ] **Step 1: Add table-driven failing policy tests**
+- [x] **Step 1: Add table-driven failing policy tests**
 
 ```ts
 test("achievement strategy ranks actual underperformers independent of row order", () => {
@@ -255,13 +255,13 @@ for (const [name, intent, catalog, expected] of [
 
 For compare, construct a low-sales store at 105% and a high-sales store at 85%; assert only the 85% store is a risk finding.
 
-- [ ] **Step 2: Run attention tests and verify missing strategy failures**
+- [x] **Step 2: Run attention tests and verify missing strategy failures**
 
 Run: `pnpm exec tsx --test tests/insights/insight-attention.test.ts`
 
 Expected: FAIL because the performance strategy and registry do not exist.
 
-- [ ] **Step 3: Implement achievement and compare policies**
+- [x] **Step 3: Implement achievement and compare policies**
 
 Use these exact bands:
 
@@ -275,17 +275,17 @@ function achievementSeverity(rate: number): InsightSeverity {
 
 Score lower rates higher with `100 - rate`; select one rate per underperforming store before gaps. For compare tie-breaking use target-gap percentage, refund rate, then stable subject key. Raw sales, orders, and AOV without targets are support/verification signals only.
 
-- [ ] **Step 4: Implement order and AOV policies**
+- [x] **Step 4: Implement order and AOV policies**
 
 Order high risk: `orderAchievementRate < 90 || trendPct <= -10`; medium: rate below 100 or any negative trend. AOV high risk: `avgAOV / targetAOV * 100 < 90 || trendPct <= -10`; medium: negative gap or negative trend. Return healthy positive plans when no negative signal exists.
 
-- [ ] **Step 5: Run attention tests**
+- [x] **Step 5: Run attention tests**
 
 Run: `pnpm exec tsx --test tests/insights/insight-attention.test.ts`
 
 Expected: PASS for all performance bands, stable ordering, and subject diversity.
 
-- [ ] **Step 6: Commit performance strategies**
+- [x] **Step 6: Commit performance strategies**
 
 ```bash
 git add src/modules/insights/insight-performance-strategies.ts src/modules/insights/insight-attention-registry.ts tests/insights/insight-attention.test.ts
@@ -302,7 +302,7 @@ git commit -m "feat: rank performance insight signals"
 **Interfaces:**
 - Handles: `refund_rate`, `anomaly_detection`, `channel_mix`, `daypart_analysis`, and `promotion_contribution`.
 
-- [ ] **Step 1: Add failing risk and neutral-structure tests**
+- [x] **Step 1: Add failing risk and neutral-structure tests**
 
 ```ts
 test("refund and anomaly strategies apply explicit risk bands", () => {
@@ -326,21 +326,21 @@ test("structure metrics never invent risk without a benchmark", () => {
 });
 ```
 
-- [ ] **Step 2: Run attention tests and verify unsupported intents fail**
+- [x] **Step 2: Run attention tests and verify unsupported intents fail**
 
 Run: `pnpm exec tsx --test tests/insights/insight-attention.test.ts`
 
 Expected: FAIL because the registry has no risk/structure strategies.
 
-- [ ] **Step 3: Implement refund and anomaly policies**
+- [x] **Step 3: Implement refund and anomaly policies**
 
 Refund above `2` percentage points is high. A store at or below `2` but at least `0.5` percentage points above overall is medium. Others are low/positive. Anomaly count at least two is high, exactly one is medium, zero is positive; sort counts descending and anomaly evidence by absolute z-score when available.
 
-- [ ] **Step 4: Implement structure policies**
+- [x] **Step 4: Implement structure policies**
 
 Rank largest share/contribution and widest cross-store spread for visibility, but use `low` severity and `needs_verification` confidence. Action contexts use `verify` mode and request capacity/margin/customer/ROI benchmarks. No “异常、下滑、低效” claims are generated from unbenchmarked shares.
 
-- [ ] **Step 5: Run attention tests and commit**
+- [x] **Step 5: Run attention tests and commit**
 
 Run: `pnpm exec tsx --test tests/insights/insight-attention.test.ts`
 
@@ -362,7 +362,7 @@ git commit -m "feat: rank risk and structure insight signals"
 - Handles: `attribution`, `report`, `custom_metric`, and legal no-data catalogs.
 - Rejects: `irrelevant` with `INSUFFICIENT_SOURCE_DATA` before plan creation.
 
-- [ ] **Step 1: Add failing summary-strategy tests**
+- [x] **Step 1: Add failing summary-strategy tests**
 
 Add these exact assertions:
 
@@ -389,25 +389,25 @@ test("summary strategies preserve business priority", () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests and verify registry gaps**
+- [x] **Step 2: Run the tests and verify registry gaps**
 
 Run: `pnpm exec tsx --test tests/insights/insight-attention.test.ts`
 
 Expected: FAIL for attribution, report, and custom intents.
 
-- [ ] **Step 3: Implement attribution and report ordering**
+- [x] **Step 3: Implement attribution and report ordering**
 
 For negative total gap, score negative contributions by `Math.abs(value)` and assign the largest negative driver high, remaining negative drivers medium. Positive drivers remain support. For reports use the exact existing alert bands: overall rate below 95 is high, individual rates below 90 are high, rates from 90 to below 100 are medium, refund above 2 is high, and anomaly dates are verification support.
 
-- [ ] **Step 4: Implement neutral custom and no-data behavior**
+- [x] **Step 4: Implement neutral custom and no-data behavior**
 
 Without `customPolicy`, custom metric facts use `low` severity and `verify` action mode. `data_availability=0` returns one positive finding, no risk hypotheses, and one `P2` monitor action context. `irrelevant` never gets a strategy entry.
 
-- [ ] **Step 5: Make the registry exhaustive**
+- [x] **Step 5: Make the registry exhaustive**
 
 Use a `satisfies Record<SystemInsightIntent, InsightAttentionStrategy>` registry so TypeScript fails when a new enabled insight intent has no strategy. Keep `irrelevant` outside `SystemInsightIntent`.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `pnpm exec tsx --test tests/insights/insight-attention.test.ts && pnpm run ts-check`
 
@@ -435,17 +435,17 @@ git commit -m "feat: complete insight attention strategy registry"
 - `createGroundedInsightDraft(catalog, plan): InsightDraft` always copies `plan.findings`.
 - Public `InsightSnapshot` and DTO remain unchanged.
 
-- [ ] **Step 1: Add failing model and fallback locking tests**
+- [x] **Step 1: Add failing model and fallback locking tests**
 
 Test a model response that attempts to reference Shanghai while the plan requires Metro and Community. Assert the persisted findings still equal plan findings. Test null, malformed JSON, unknown context ID, numeric action prose, and missing required high-risk context; all must use the same deterministic findings.
 
-- [ ] **Step 2: Run generation/application tests and verify current composer allows free finding selection**
+- [x] **Step 2: Run generation/application tests and verify current composer allows free finding selection**
 
 Run: `pnpm exec tsx --test tests/insights/insight-generation.test.ts tests/insights/insight-application.test.ts`
 
 Expected: FAIL because composer input has no plan and model output currently includes arbitrary `findings`.
 
-- [ ] **Step 3: Change the internal model draft contract**
+- [x] **Step 3: Change the internal model draft contract**
 
 ```ts
 interface InsightModelDraft {
@@ -464,11 +464,11 @@ interface InsightModelDraft {
 
 Map each valid `contextId` back to the plan's `sourceId`, priority, and `verificationMetricCode`. Reject unknown/duplicate contexts and require an action for every high-risk context up to the three-context cap.
 
-- [ ] **Step 4: Update the composer prompt**
+- [x] **Step 4: Update the composer prompt**
 
 Remove model-selected findings and numeric fact prose. Provide locked finding labels, severities, action context IDs, subject labels, modes, allowed owner roles, and allowed verification metrics. Explicitly state that causes remain hypotheses and no numeric claims may appear in generated prose.
 
-- [ ] **Step 5: Build the plan in Insight Application**
+- [x] **Step 5: Build the plan in Insight Application**
 
 ```ts
 const catalog = buildCatalog({ intent: analysis.intent, analysisData: analysis.analysisData });
@@ -478,11 +478,11 @@ const draft = await composer.compose({ ...input, catalog, plan });
 
 On model or semantic validation failure, call `createGroundedInsightDraft(catalog, plan)`. Keep generation tokens, authorization, repository CAS, and SSE lifecycle unchanged.
 
-- [ ] **Step 6: Add healthy/no-data deterministic headlines**
+- [x] **Step 6: Add healthy/no-data deterministic headlines**
 
 Risk headline uses the first ranked risk finding. Healthy headline states that the scope has no material risk and can be monitored. No-data headline remains `当前范围暂无可用经营数据，洞察已更新`.
 
-- [ ] **Step 7: Run focused insight tests and commit**
+- [x] **Step 7: Run focused insight tests and commit**
 
 Run: `pnpm exec tsx --test tests/insights/insight-attention.test.ts tests/insights/insight-generation.test.ts tests/insights/insight-application.test.ts tests/insights/insight-types.test.ts`
 
@@ -509,7 +509,7 @@ git commit -m "fix: lock insight findings before model composition"
 - Produces: optional `MetricInsightPolicy` on custom metric input/definition/execution.
 - Preserves: old JSON records with missing policy normalize to `null`.
 
-- [ ] **Step 1: Add failing policy validation and compatibility tests**
+- [x] **Step 1: Add failing policy validation and compatibility tests**
 
 ```ts
 test("old custom metrics load with a neutral insight policy", async () => {
@@ -536,13 +536,13 @@ test("metric publication rejects invalid policy thresholds", async () => {
 });
 ```
 
-- [ ] **Step 2: Run admin tests and verify missing type/schema failures**
+- [x] **Step 2: Run admin tests and verify missing type/schema failures**
 
 Run: `pnpm exec tsx --test tests/admin/metrics.test.ts`
 
 Expected: FAIL because `insightPolicy` is not defined or accepted.
 
-- [ ] **Step 3: Add the policy domain type and normalization**
+- [x] **Step 3: Add the policy domain type and normalization**
 
 ```ts
 export interface MetricInsightPolicy {
@@ -556,7 +556,7 @@ export interface MetricInsightPolicy {
 
 Require finite values, non-negative deviation thresholds for target/scoped-average, `targetValue` for target modes, and a critical threshold farther into the risk region than warning. Normalize omitted policy to `null`; preserve it when SQL changes.
 
-- [ ] **Step 4: Extend the admin route and runtime metadata**
+- [x] **Step 4: Extend the admin route and runtime metadata**
 
 Add this optional nullable Zod object to create/generate/publish actions:
 
@@ -585,7 +585,7 @@ const plan = buildInsightAttentionPlan({
 });
 ```
 
-- [ ] **Step 5: Add modular admin controls**
+- [x] **Step 5: Add modular admin controls**
 
 In `MetricRegistryPanel`, add an “洞察判断” switch and render the controls in the existing form grid:
 
@@ -603,17 +603,17 @@ In `MetricRegistryPanel`, add an “洞察判断” switch and render the contro
 
 When enabled, use existing `Select` controls for direction/benchmark and `Input type="number"` controls for warning, critical, and conditional target. Keep the controls in the existing un-nested panel and disable target input unless direction is `target_is_best` or benchmark is `target`.
 
-- [ ] **Step 6: Add custom policy strategy tests**
+- [x] **Step 6: Add custom policy strategy tests**
 
 Assert `lower_is_better` above critical is high, above warning is medium; `higher_is_better` below critical is high; target mode uses absolute deviation; neutral/missing policy never creates risk.
 
-- [ ] **Step 7: Run admin and insight tests**
+- [x] **Step 7: Run admin and insight tests**
 
 Run: `pnpm exec tsx --test tests/admin/metrics.test.ts tests/insights/insight-attention.test.ts && pnpm run ts-check`
 
 Expected: PASS; old metric registry fixtures still load.
 
-- [ ] **Step 8: Commit custom policy support**
+- [x] **Step 8: Commit custom policy support**
 
 ```bash
 git add src/modules/admin/metrics/metric-definition.ts src/modules/admin/metrics/metric-admin-application.ts src/modules/admin/metrics/custom-metric-runtime.ts src/app/api/admin/metrics/route.ts src/components/admin/MetricRegistryPanel.tsx src/modules/insights/insight-summary-strategies.ts tests/admin/metrics.test.ts tests/insights/insight-attention.test.ts
@@ -631,35 +631,35 @@ git commit -m "feat: configure custom metric insight policies"
 **Interfaces:**
 - Verifies unchanged public Insight/SSE contracts and correct hard-case focus.
 
-- [ ] **Step 1: Add a contract regression for unchanged DTO/SSE shapes**
+- [x] **Step 1: Add a contract regression for unchanged DTO/SSE shapes**
 
 Assert deterministic plan metadata and custom policy internals do not appear in `InsightSnapshotDto` or SSE events. Preserve `generating`, `updated`, `failed`, `insightId`, `findingCount`, `actionCount`, and optional generation reference fields.
 
-- [ ] **Step 2: Add the hard-case chat/insight integration test**
+- [x] **Step 2: Add the hard-case chat/insight integration test**
 
 Feed authorized analysis for 2025-05-01 through 2025-05-07 where Shanghai is 102%, Metro is 82%, and Community is 94%. Assert Chatbox content remains complete, insight status is `updated`, and the first two findings have subjects `S004` and `S005`; no risk finding uses `S001`.
 
-- [ ] **Step 3: Update AGENTS.md**
+- [x] **Step 3: Update AGENTS.md**
 
 Document source catalog completeness, the strategy registry as the sole attention authority, deterministic locked findings, model-bound action contexts, exact threshold ownership, neutral unbenchmarked structure metrics, and optional custom metric policies.
 
-- [ ] **Step 4: Run the complete affected suite**
+- [x] **Step 4: Run the complete affected suite**
 
 Run: `pnpm exec tsx --test tests/insights/insight-attention.test.ts tests/insights/insight-generation.test.ts tests/insights/insight-application.test.ts tests/insights/insight-types.test.ts tests/admin/metrics.test.ts tests/agents/agents.test.ts tests/chat/chat.test.ts tests/contracts/public-contracts.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run static and build verification**
+- [x] **Step 5: Run static and build verification**
 
 Run: `pnpm run ts-check && pnpm run lint:build && pnpm run build`
 
 Expected: PASS.
 
-- [ ] **Step 6: Verify the admin UI at desktop and mobile widths**
+- [x] **Step 6: Verify the admin UI at desktop and mobile widths**
 
 Start LuminaX on port 5000. In the authenticated metric registry, enable and disable the policy switch, change direction/benchmark, validate conditional target input, save a draft, reload, and confirm values persist. Check 1440px and 390px widths for overlap and text clipping.
 
-- [ ] **Step 7: Verify the reported scenario through the local UI**
+- [x] **Step 7: Verify the reported scenario through the local UI**
 
 Ask `分析2025年5月1日至2025年5月7日所有门店的销售情况`.
 
@@ -674,7 +674,7 @@ Primary risk subjects: 地铁站店, 社区中心店
 
 Repeat with the insight model forced to time out. Expected: identical primary findings and successful update.
 
-- [ ] **Step 8: Commit contracts and documentation**
+- [x] **Step 8: Commit contracts and documentation**
 
 ```bash
 git add tests/contracts/public-contracts.test.ts tests/chat/chat.test.ts AGENTS.md

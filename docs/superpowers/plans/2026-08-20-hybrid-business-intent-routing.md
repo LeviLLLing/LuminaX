@@ -46,7 +46,7 @@
 - Produces: `classifyIntent(question: string, context?: { scopeHint?: IntentScopeHint }): IntentResult`.
 - Preserves: `extractStoreIds(question)` and `extractDateRange(question)` signatures.
 
-- [ ] **Step 1: Write failing fallback classification tests**
+- [x] **Step 1: Write failing fallback classification tests**
 
 ```ts
 import assert from "node:assert/strict";
@@ -74,13 +74,13 @@ test("single-store target questions remain achievement analysis", () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify the broad query fails**
+- [x] **Step 2: Run the focused test and verify the broad query fails**
 
 Run: `pnpm exec tsx --test tests/intent/business-intent-router.test.ts`
 
 Expected: FAIL because the first broad all-store question currently returns `achievement_rate`.
 
-- [ ] **Step 3: Add the scope hint type and broad-query fallback**
+- [x] **Step 3: Add the scope hint type and broad-query fallback**
 
 ```ts
 export type IntentScopeHint =
@@ -108,7 +108,7 @@ export function classifyIntent(
 }
 ```
 
-- [ ] **Step 4: Import the new test module and run it**
+- [x] **Step 4: Import the new test module and run it**
 
 Add `import "./intent/business-intent-router.test";` to `tests/module-interfaces.test.ts`.
 
@@ -116,7 +116,7 @@ Run: `pnpm exec tsx --test tests/intent/business-intent-router.test.ts`
 
 Expected: PASS for broad multi-store, single-store target, explicit intent, date, and store parsing cases.
 
-- [ ] **Step 5: Commit the deterministic fallback**
+- [x] **Step 5: Commit the deterministic fallback**
 
 ```bash
 git add src/modules/intent/intent-classifier.ts tests/intent/business-intent-router.test.ts tests/module-interfaces.test.ts
@@ -136,7 +136,7 @@ git commit -m "fix: classify broad multi-store sales questions"
 - Produces: `BusinessIntentRouter.route(input): Promise<BusinessIntentRouteResult>`.
 - Produces: `createBusinessIntentRouter({ model, fallback?, now? }): BusinessIntentRouter`.
 
-- [ ] **Step 1: Add failing tests for valid, low-confidence, and invalid model output**
+- [x] **Step 1: Add failing tests for valid, low-confidence, and invalid model output**
 
 ```ts
 test("model router accepts only a confident allowlisted intent", async () => {
@@ -174,13 +174,13 @@ test("router falls back on low confidence or forbidden intent", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused router tests and verify missing exports fail**
+- [x] **Step 2: Run the focused router tests and verify missing exports fail**
 
 Run: `pnpm exec tsx --test tests/intent/business-intent-router.test.ts`
 
 Expected: FAIL because `createBusinessIntentRouter` and its types do not exist.
 
-- [ ] **Step 3: Implement the router contracts and strict parser**
+- [x] **Step 3: Implement the router contracts and strict parser**
 
 ```ts
 export interface BusinessIntentRouteInput {
@@ -207,7 +207,7 @@ const ALLOWED_INTENTS = new Set<SystemAnalysisIntent>([
 
 Use `extractJsonObject`, reject extra execution fields by reading only an exact object with `intent` and `confidence`, require `confidence >= 0.70`, and call `classifyIntent(question, { scopeHint })` for every fallback. Build the model message with `serializePromptData` so user text remains data.
 
-- [ ] **Step 4: Add the compact system prompt**
+- [x] **Step 4: Add the compact system prompt**
 
 ```ts
 export const BUSINESS_INTENT_ROUTER_SYSTEM_PROMPT = `
@@ -223,13 +223,13 @@ export const BUSINESS_INTENT_ROUTER_SYSTEM_PROMPT = `
 `.trim();
 ```
 
-- [ ] **Step 5: Run router tests and type checking**
+- [x] **Step 5: Run router tests and type checking**
 
 Run: `pnpm exec tsx --test tests/intent/business-intent-router.test.ts && pnpm run ts-check`
 
 Expected: PASS; no public `AnalysisIntent` values change.
 
-- [ ] **Step 6: Commit the model router**
+- [x] **Step 6: Commit the model router**
 
 ```bash
 git add src/modules/intent/business-intent-router.ts src/modules/agents/prompts/business-intent-router-system-prompt.ts tests/intent/business-intent-router.test.ts
@@ -248,7 +248,7 @@ git commit -m "feat: add validated business intent router"
 - Produces: `CustomMetricMatchResult = { status: "matched"; metric } | { status: "none" | "ambiguous"; metric: null }`.
 - Produces: `CustomMetricRuntime.match(question): Promise<CustomMetricMatchResult>`.
 
-- [ ] **Step 1: Write failing tests for a unique and equal-score match**
+- [x] **Step 1: Write failing tests for a unique and equal-score match**
 
 ```ts
 test("custom metric matching refuses equal-score ambiguity", async () => {
@@ -275,13 +275,13 @@ test("custom metric matching refuses equal-score ambiguity", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the admin metric test and verify the old return type fails**
+- [x] **Step 2: Run the admin metric test and verify the old return type fails**
 
 Run: `pnpm exec tsx --test tests/admin/metrics.test.ts`
 
 Expected: FAIL because `match` currently returns a metric or `null` and silently selects one equal-score match.
 
-- [ ] **Step 3: Implement explicit match results**
+- [x] **Step 3: Implement explicit match results**
 
 ```ts
 export type CustomMetricMatchResult =
@@ -298,13 +298,13 @@ return { status: "matched", metric: top.metric };
 
 Update all test fakes to return the new union. Do not execute a custom SQL when status is `ambiguous`.
 
-- [ ] **Step 4: Run admin and Agent tests**
+- [x] **Step 4: Run admin and Agent tests**
 
 Run: `pnpm exec tsx --test tests/admin/metrics.test.ts tests/agents/agents.test.ts`
 
 Expected: PASS; unique custom matches retain precedence and ambiguity yields no custom execution.
 
-- [ ] **Step 5: Commit custom matching**
+- [x] **Step 5: Commit custom matching**
 
 ```bash
 git add src/modules/admin/metrics/custom-metric-runtime.ts tests/admin/metrics.test.ts tests/agents/agents.test.ts
@@ -322,7 +322,7 @@ git commit -m "fix: reject ambiguous custom metric matches"
 - Preserves: deterministic fallback when `intentRouter` is omitted, so existing test factories remain valid.
 - Produces: `resolveIntentScopeHint(question, requestedStoreIds, uiStoreIds): IntentScopeHint` as a private helper.
 
-- [ ] **Step 1: Write failing integration tests**
+- [x] **Step 1: Write failing integration tests**
 
 ```ts
 test("business agent uses routed intent but deterministic date and stores", async () => {
@@ -355,13 +355,13 @@ test("business agent uses routed intent but deterministic date and stores", asyn
 
 Also assert: custom match skips `intentRouter.route`; an ambiguous custom match continues to system routing; router input includes only the last user question truncated to 300 characters; Governance rejection remains outside this component.
 
-- [ ] **Step 2: Run Agent tests and verify the router dependency is unsupported**
+- [x] **Step 2: Run Agent tests and verify the router dependency is unsupported**
 
 Run: `pnpm exec tsx --test tests/agents/agents.test.ts`
 
 Expected: FAIL because `BusinessAgentDependencies` has no `intentRouter` and execution still uses `classifyIntent` directly.
 
-- [ ] **Step 3: Integrate routing without changing entity authority**
+- [x] **Step 3: Integrate routing without changing entity authority**
 
 Refactor the start of `execute` to this order:
 
@@ -384,13 +384,13 @@ const finalIntent = customMatch.status === "matched"
 
 Reuse `extractDateRange` and `extractStoreIds` results. Do not read dates or stores from router output. Continue to call existing `authorizeScope` after the final intent is selected.
 
-- [ ] **Step 4: Run focused Agent and chat contract tests**
+- [x] **Step 4: Run focused Agent and chat contract tests**
 
 Run: `pnpm exec tsx --test tests/agents/agents.test.ts tests/chat/chat.test.ts tests/contracts/public-contracts.test.ts`
 
 Expected: PASS; routed intent reaches SQL, callbacks, SSE, and insight planning without payload changes.
 
-- [ ] **Step 5: Commit Business Agent integration**
+- [x] **Step 5: Commit Business Agent integration**
 
 ```bash
 git add src/modules/agents/business/business-agent.ts tests/agents/agents.test.ts
@@ -409,7 +409,7 @@ git commit -m "feat: route business intent before SQL execution"
 - Produces: optional `onRoute(event: BusinessIntentRouteEvent): void` dependency.
 - Event fields: `intent`, `source`, `confidenceBand`, `durationMs`, `fallbackReason`, `disagreesWithFallback`; no raw prompt or response.
 
-- [ ] **Step 1: Add a failing telemetry redaction test**
+- [x] **Step 1: Add a failing telemetry redaction test**
 
 ```ts
 test("route telemetry contains no user or model text", async () => {
@@ -432,13 +432,13 @@ test("route telemetry contains no user or model text", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the router test and verify the observer is missing**
+- [x] **Step 2: Run the router test and verify the observer is missing**
 
 Run: `pnpm exec tsx --test tests/intent/business-intent-router.test.ts`
 
 Expected: FAIL because `onRoute` is not implemented.
 
-- [ ] **Step 3: Add sanitized route observation and runtime model composition**
+- [x] **Step 3: Add sanitized route observation and runtime model composition**
 
 ```ts
 const intentTimeoutMs = Number(process.env.DEEPSEEK_INTENT_TIMEOUT_MS || 8_000);
@@ -456,17 +456,17 @@ const intentRouter = createBusinessIntentRouter({
 
 Inject `intentRouter` into `createBusinessAgent`. Validate `DEEPSEEK_INTENT_TIMEOUT_MS` as a positive finite value and fall back to `8_000` when invalid.
 
-- [ ] **Step 4: Update AGENTS.md**
+- [x] **Step 4: Update AGENTS.md**
 
 Document that Business intent routing uses `DEEPSEEK_INTENT_MODEL || DEEPSEEK_BUSINESS_MODEL || DEEPSEEK_MODEL`, is stateless, may read one bounded previous user question, and cannot alter entity scope or SQL parameters.
 
-- [ ] **Step 5: Run focused verification**
+- [x] **Step 5: Run focused verification**
 
 Run: `pnpm exec tsx --test tests/intent/business-intent-router.test.ts tests/agents/agents.test.ts tests/chat/chat.test.ts tests/contracts/public-contracts.test.ts && pnpm run ts-check && pnpm run lint:build`
 
 Expected: all commands PASS; no raw question appears in captured route events.
 
-- [ ] **Step 6: Commit runtime composition**
+- [x] **Step 6: Commit runtime composition**
 
 ```bash
 git add src/modules/intent/business-intent-router.ts src/modules/chat/chat-composition.ts tests/intent/business-intent-router.test.ts AGENTS.md
@@ -482,19 +482,19 @@ git commit -m "feat: compose DeepSeek intent routing"
 **Interfaces:**
 - Verifies the final `intent` SSE event and deterministic scope for the approved hard case.
 
-- [ ] **Step 1: Run the complete affected test set**
+- [x] **Step 1: Run the complete affected test set**
 
 Run: `pnpm exec tsx --test tests/intent/business-intent-router.test.ts tests/admin/metrics.test.ts tests/agents/agents.test.ts tests/chat/chat.test.ts tests/contracts/public-contracts.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 2: Run static validation**
+- [x] **Step 2: Run static validation**
 
 Run: `pnpm run ts-check && pnpm run lint:build`
 
 Expected: PASS.
 
-- [ ] **Step 3: Restart only the port 5000 LuminaX process and perform the hard acceptance request**
+- [x] **Step 3: Restart only the port 5000 LuminaX process and perform the hard acceptance request**
 
 Submit `分析2025年5月1日至5月7日所有门店的销售情况` through the authenticated local UI or API.
 
@@ -509,6 +509,6 @@ endDate=2025-05-07
 
 Repeat once with `DEEPSEEK_INTENT_TIMEOUT_MS=1` in a controlled restart to force fallback. Expected: the same intent and scope.
 
-- [ ] **Step 4: Record the verification without committing runtime state**
+- [x] **Step 4: Record the verification without committing runtime state**
 
 Confirm `.env.local`, `.luminax/`, logs, cookies, and credentials remain untracked. Do not commit local request output.
