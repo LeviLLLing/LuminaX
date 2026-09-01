@@ -3,8 +3,14 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LoginForm } from "../../src/components/auth/LoginForm";
+import {
+  WorkbenchErrorState,
+  WorkbenchLoadingState,
+} from "../../src/components/luminax/LuminaXApp";
 import { ProductBrandBar } from "../../src/components/luminax/ProductBrandBar";
 import { ProductState } from "../../src/components/luminax/ProductState";
+import { WorkbenchHeader } from "../../src/components/luminax/workbench/WorkbenchHeader";
+import { WorkbenchShell } from "../../src/components/luminax/workbench/WorkbenchShell";
 
 test("product brand and state primitives expose stable semantics", () => {
   const brand = renderToStaticMarkup(
@@ -57,4 +63,60 @@ test("login remains a single accessible task", () => {
   assert.match(html, /autocomplete="username"/i);
   assert.match(html, /aria-busy="false"/);
   assert.doesNotMatch(html, /了解更多|联系我们|产品能力/);
+});
+
+test("workbench shell keeps stable data and decision regions", () => {
+  const html = renderToStaticMarkup(
+    createElement(WorkbenchShell, {
+      header: createElement("div", null, "header"),
+      scopeBar: createElement("div", null, "scope"),
+      dataPanel: createElement("div", null, "data"),
+      assistantPanel: createElement("div", null, "assistant"),
+    })
+  );
+
+  assert.match(html, /data-workbench-region="scope"/);
+  assert.match(html, /data-workbench-region="data"/);
+  assert.match(html, /data-workbench-region="assistant"/);
+  assert.match(html, /经营数据/);
+  assert.match(html, /决策协同/);
+});
+
+test("workbench header reuses product branding and preserves commands", () => {
+  const html = renderToStaticMarkup(
+    createElement(WorkbenchHeader, {
+      user: {
+        id: "user-1",
+        username: "admin",
+        displayName: "系统管理员",
+        role: "super_admin",
+      },
+      context: {
+        templateId: "regional_manager",
+        availableStoreIds: ["S001"],
+        availableMetricCodes: [],
+        availableIntents: [],
+        canAccessAdmin: true,
+      },
+    })
+  );
+
+  assert.match(html, /data-luminax-brand="true"/);
+  assert.match(html, /区域经理模板/);
+  assert.match(html, /href="\/admin"/);
+  assert.match(html, /退出登录/);
+});
+
+test("workbench lifecycle feedback uses shared product states", () => {
+  const loading = renderToStaticMarkup(createElement(WorkbenchLoadingState));
+  const error = renderToStaticMarkup(
+    createElement(WorkbenchErrorState, {
+      message: "工作台暂时不可用",
+      onRetry: () => undefined,
+    })
+  );
+
+  assert.match(loading, /data-product-state="loading"/);
+  assert.match(error, /data-product-state="error"/);
+  assert.match(error, /重新加载/);
 });

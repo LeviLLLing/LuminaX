@@ -24,7 +24,7 @@ export function WorkbenchShell({
   const [assistantCollapsed, setAssistantCollapsed] = useState(false);
 
   return (
-    <div className="flex h-dvh min-h-[560px] flex-col overflow-hidden bg-[#f5f6f7] text-black">
+    <div className="flex h-dvh min-h-[560px] flex-col overflow-hidden bg-[var(--luminax-canvas)] text-foreground">
       {header}
       <MobilePaneSwitch value={mobilePane} onChange={setMobilePane} />
 
@@ -33,7 +33,7 @@ export function WorkbenchShell({
           "grid min-h-0 flex-1",
           assistantCollapsed
             ? "md:grid-cols-[minmax(0,1fr)_48px]"
-            : "md:grid-cols-[minmax(0,1fr)_minmax(280px,38%)] lg:grid-cols-[minmax(0,2.1fr)_minmax(320px,1fr)]"
+            : "md:grid-cols-[minmax(0,2.1fr)_minmax(280px,1fr)] lg:grid-cols-[minmax(0,2.1fr)_minmax(320px,1fr)]"
         )}
       >
         <section
@@ -44,13 +44,18 @@ export function WorkbenchShell({
               : "hidden min-h-0 md:flex md:flex-col"
           )}
         >
-          {scopeBar}
-          {dataPanel}
+          <div data-workbench-region="scope" className="shrink-0">
+            {scopeBar}
+          </div>
+          <div data-workbench-region="data" className="flex min-h-0 flex-1">
+            {dataPanel}
+          </div>
         </section>
 
         <aside
+          data-workbench-region="assistant"
           className={cn(
-            "min-w-0 border-l border-[#dedfe2]",
+            "min-w-0 border-l border-border bg-background",
             mobilePane === "assistant"
               ? "flex min-h-0 flex-col"
               : "hidden min-h-0 flex-col md:flex"
@@ -82,7 +87,7 @@ function MobilePaneSwitch({
   onChange(value: MobilePane): void;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-1 border-b border-[#dedfe2] bg-white p-1 md:hidden">
+    <div className="grid grid-cols-2 gap-1 border-b border-border bg-white p-1 md:hidden">
       <SegmentButton
         active={value === "data"}
         onClick={() => onChange("data")}
@@ -93,7 +98,7 @@ function MobilePaneSwitch({
         active={value === "assistant"}
         onClick={() => onChange("assistant")}
       >
-        分析决策
+        决策协同
       </SegmentButton>
     </div>
   );
@@ -115,7 +120,9 @@ function SegmentButton({
       onClick={onClick}
       className={cn(
         "min-w-0 rounded-md px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1",
-        active ? "bg-[#FFE600] text-black" : "text-[#303238] hover:bg-[#f5f6f7]"
+        active
+          ? "bg-[var(--luminax-yellow)] text-[var(--luminax-ink)]"
+          : "text-muted-foreground hover:bg-[var(--luminax-canvas)]"
       )}
     >
       <span className="block overflow-hidden text-ellipsis whitespace-nowrap">
@@ -133,7 +140,7 @@ function AssistantCollapseButton({
   onClick(): void;
 }) {
   const Icon = collapsed ? PanelRightOpen : PanelRightClose;
-  const label = collapsed ? "展开分析决策" : "收起分析决策";
+  const label = collapsed ? "展开决策协同" : "收起决策协同";
 
   return (
     <Tooltip>
@@ -144,7 +151,7 @@ function AssistantCollapseButton({
           aria-label={label}
           aria-expanded={!collapsed}
           onClick={onClick}
-          className="hidden size-9 place-items-center self-end border-b border-[#dedfe2] bg-white text-black transition-colors hover:bg-[#f5f6f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-inset md:grid"
+          className="hidden size-9 place-items-center self-end border-b border-border bg-white text-foreground transition-colors hover:bg-[var(--luminax-canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset md:grid"
         >
           <Icon className="size-4" />
         </button>

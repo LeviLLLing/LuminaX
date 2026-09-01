@@ -192,6 +192,15 @@ test("scope bar keeps the aggregate authorized-store scope selectable", () => {
           opening_date: "2025-01-01",
           area_type: "Commercial",
         },
+        {
+          store_id: "S002",
+          store_name: "Store Two",
+          region: "East",
+          city: "Shanghai",
+          store_type: "Street",
+          opening_date: "2025-02-01",
+          area_type: "Residential",
+        },
       ],
       availableMetricCodes: [],
       selectedStore: "all",
@@ -205,7 +214,13 @@ test("scope bar keeps the aggregate authorized-store scope selectable", () => {
     })
   );
 
+  assert.match(html, /aria-label="经营范围"/);
   assert.match(html, /<option value="all" selected="">/);
+  assert.match(html, /全部授权门店/);
+  assert.match(html, /开始日期/);
+  assert.match(html, /结束日期/);
+  assert.match(html, /<option value="S001">Store One<\/option>/);
+  assert.match(html, /<option value="S002">Store Two<\/option>/);
 });
 
 test("weekly report client sends only the authorized report scope", async (context) => {
