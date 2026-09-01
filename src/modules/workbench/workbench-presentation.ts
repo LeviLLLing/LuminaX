@@ -7,6 +7,18 @@ import type {
 } from "./workbench-types";
 
 export type InsightView = "overview" | "analysis" | "report";
+export interface WorkbenchPresentationProfile {
+  defaultView: InsightView;
+  assistantMode: "summary_first" | "action_first";
+  sectionOrder: readonly InsightSectionId[];
+  defaultExpandedSections: readonly (
+    | "summary"
+    | "findings"
+    | "evidence"
+    | "actions"
+  )[];
+}
+
 export interface ActiveInsightScope {
   storeIds: string[];
   startDate: string;
@@ -48,6 +60,44 @@ const SECTION_ORDER: readonly InsightSectionId[] = [
   "refund",
 ];
 
+const PRESENTATION_PROFILES: Record<
+  WorkbenchTemplateId,
+  WorkbenchPresentationProfile
+> = {
+  regional_manager: {
+    defaultView: "overview",
+    assistantMode: "action_first",
+    sectionOrder: [
+      "achievement",
+      "totalSales",
+      "orders",
+      "aov",
+      "salesTrend",
+      "refund",
+      "channel",
+      "category",
+      "daypart",
+    ],
+    defaultExpandedSections: ["summary", "findings", "actions"],
+  },
+  default: {
+    defaultView: "overview",
+    assistantMode: "summary_first",
+    sectionOrder: [
+      "totalSales",
+      "achievement",
+      "refund",
+      "salesTrend",
+      "orders",
+      "aov",
+      "channel",
+      "category",
+      "daypart",
+    ],
+    defaultExpandedSections: ["summary", "findings", "evidence"],
+  },
+};
+
 const METRIC_SECTIONS: Readonly<Record<string, readonly InsightSectionId[]>> = {
   achievement_rate: ["totalSales", "achievement", "salesTrend"],
   order_trend: ["orders", "salesTrend"],
@@ -69,6 +119,20 @@ export function getVisibleInsightSections(
     metricCodes.flatMap((metricCode) => METRIC_SECTIONS[metricCode] ?? [])
   );
   return SECTION_ORDER.filter((section) => visible.has(section));
+}
+
+export function getWorkbenchPresentationProfile(
+  templateId: WorkbenchTemplateId
+): WorkbenchPresentationProfile {
+  return PRESENTATION_PROFILES[templateId];
+}
+
+export function getOrderedInsightSections(
+  metricCodes: readonly string[],
+  profile: WorkbenchPresentationProfile
+): InsightSectionId[] {
+  const visible = new Set(getVisibleInsightSections(metricCodes));
+  return profile.sectionOrder.filter((section) => visible.has(section));
 }
 
 export function resolveInsightView(intent: AnalysisIntent): InsightView {

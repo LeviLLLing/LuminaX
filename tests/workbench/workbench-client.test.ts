@@ -12,9 +12,11 @@ import {
 import { authorizeIntentMetadata } from "../../src/modules/workbench/workbench-intent-policy";
 import {
   getMetricLabel,
+  getOrderedInsightSections,
   getSuggestedQuestions,
   getVisibleInsightSections,
   getWorkbenchCopy,
+  getWorkbenchPresentationProfile,
 } from "../../src/modules/workbench/workbench-presentation";
 import { createWorkbenchContextRequestLifecycle } from "../../src/hooks/workbench-context-lifecycle";
 import type { WorkbenchContext } from "../../src/modules/workbench/workbench-types";
@@ -110,6 +112,22 @@ test("presentation selectors expose only metric-backed sections", () => {
     ["totalSales", "achievement", "salesTrend", "channel"]
   );
   assert.equal(getWorkbenchCopy("regional_manager").title, "辖区经营概览");
+});
+
+test("presentation profiles adapt priority without widening permissions", () => {
+  const regional = getWorkbenchPresentationProfile("regional_manager");
+  const executive = getWorkbenchPresentationProfile("default");
+  assert.equal(regional.assistantMode, "action_first");
+  assert.equal(executive.assistantMode, "summary_first");
+  assert.equal(regional.defaultView, "overview");
+  assert.deepEqual(
+    getOrderedInsightSections(["achievement_rate", "refund_rate"], executive),
+    ["totalSales", "achievement", "refund", "salesTrend"]
+  );
+  assert.doesNotMatch(
+    JSON.stringify(getOrderedInsightSections(["achievement_rate"], regional)),
+    /channel|refund/
+  );
 });
 
 test("authorization rejects explicit irrelevant intent", () => {
@@ -262,6 +280,7 @@ test("insight canvas exposes the renamed tab", () => {
     createElement(InsightCanvas, {
       view: "analysis",
       templateId: "regional_manager",
+      presentationProfile: getWorkbenchPresentationProfile("regional_manager"),
       availableMetricCodes: [],
       dataSummary: null,
       chartOptions: {} as DashboardChartOptions,

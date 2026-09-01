@@ -11,7 +11,10 @@ import { useLuminaXController } from "@/hooks/use-luminax-controller";
 import { useLatestInsight } from "@/hooks/use-latest-insight";
 import { useWorkbenchContext } from "@/hooks/use-workbench-context";
 import type { AuthenticatedUser } from "@/modules/auth/auth-types";
-import { getSuggestedQuestions } from "@/modules/workbench/workbench-presentation";
+import {
+  getSuggestedQuestions,
+  getWorkbenchPresentationProfile,
+} from "@/modules/workbench/workbench-presentation";
 
 export function LuminaXApp({ user }: { user: AuthenticatedUser }) {
   const workbench = useWorkbenchContext();
@@ -49,6 +52,9 @@ export function LuminaXApp({ user }: { user: AuthenticatedUser }) {
   }
 
   const suggestions = getSuggestedQuestions(workbench.context);
+  const presentationProfile = getWorkbenchPresentationProfile(
+    workbench.context.templateId
+  );
   return (
     <WorkbenchShell
       header={<WorkbenchHeader user={user} context={workbench.context} />}
@@ -70,6 +76,7 @@ export function LuminaXApp({ user }: { user: AuthenticatedUser }) {
         <InsightCanvas
           view={controller.insightView}
           templateId={workbench.context.templateId}
+          presentationProfile={presentationProfile}
           availableMetricCodes={workbench.context.availableMetricCodes}
           dataSummary={controller.dataSummary}
           chartOptions={controller.chartOptions}
