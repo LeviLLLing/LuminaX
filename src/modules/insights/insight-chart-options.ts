@@ -1,12 +1,14 @@
 import type { EChartsOption } from "echarts";
+import {
+  createChartTextStyle,
+  LUMINAX_CHART_COLORS,
+} from "@/modules/visualization/chart-theme";
 import type { InsightEvidence, InsightEvidenceSeries } from "./insight-types";
 
 const COLORS = {
-  positive: "#16794f",
-  negative: "#c53b32",
-  neutral: "#6b7280",
-  baseline: "#17181a",
-  grid: "#dedfe2",
+  positive: LUMINAX_CHART_COLORS.positive,
+  negative: LUMINAX_CHART_COLORS.risk,
+  neutral: LUMINAX_CHART_COLORS.neutral,
 } as const;
 
 const HORIZONTAL_TYPES = new Set<InsightEvidence["type"]>([
@@ -29,9 +31,16 @@ function buildHorizontalOption(evidence: InsightEvidence): EChartsOption {
   );
   return {
     animation: false,
+    textStyle: createChartTextStyle(),
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
     grid: { left: 96, right: 56, top: 16, bottom: 28, containLabel: true },
-    xAxis: { type: "value", splitLine: { lineStyle: { color: COLORS.grid } } },
+    xAxis: {
+      type: "value",
+      axisLabel: createChartTextStyle(),
+      splitLine: {
+        lineStyle: { color: LUMINAX_CHART_COLORS.neutral, opacity: 0.2 },
+      },
+    },
     yAxis: { type: "category", data: rows.map((row) => row.label), axisTick: { show: false } },
     series: [
       {
@@ -48,7 +57,7 @@ function buildHorizontalOption(evidence: InsightEvidence): EChartsOption {
         type: "scatter",
         symbol: "rect",
         symbolSize: [2, 18],
-        itemStyle: { color: COLORS.baseline },
+        itemStyle: { color: LUMINAX_CHART_COLORS.neutral },
         data: rows.flatMap((row) =>
           row.baseline === undefined
             ? []
@@ -68,14 +77,21 @@ function buildTimelineOption(evidence: InsightEvidence): EChartsOption {
   const rows = [...evidence.series].sort((left, right) => left.key.localeCompare(right.key));
   return {
     animation: false,
+    textStyle: createChartTextStyle(),
     tooltip: { trigger: "axis" },
     grid: { left: 96, right: 56, top: 16, bottom: 48, containLabel: true },
     xAxis: {
       type: "category",
       data: rows.map((row) => row.label),
-      axisLabel: { interval: 0 },
+      axisLabel: { ...createChartTextStyle(), interval: 0 },
     },
-    yAxis: { type: "value", splitLine: { lineStyle: { color: COLORS.grid } } },
+    yAxis: {
+      type: "value",
+      axisLabel: createChartTextStyle(),
+      splitLine: {
+        lineStyle: { color: LUMINAX_CHART_COLORS.neutral, opacity: 0.2 },
+      },
+    },
     series: [
       {
         type: evidence.type === "anomaly_dates" ? "line" : "bar",
@@ -97,8 +113,11 @@ function buildTimelineOption(evidence: InsightEvidence): EChartsOption {
         connectNulls: false,
         symbol: "circle",
         symbolSize: 6,
-        itemStyle: { color: COLORS.baseline },
-        lineStyle: { type: "dashed", color: COLORS.baseline },
+        itemStyle: { color: LUMINAX_CHART_COLORS.neutral },
+        lineStyle: {
+          type: "dashed",
+          color: LUMINAX_CHART_COLORS.neutral,
+        },
         label: {
           show: true,
           position: "top",
