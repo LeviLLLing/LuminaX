@@ -299,7 +299,7 @@ function buildRefundOption(chartData: ChartData) {
         yAxisIndex: 1,
         data: cancelData,
         smooth: true,
-        itemStyle: { color: LUMINAX_CHART_COLORS.accent },
+        itemStyle: { color: LUMINAX_CHART_COLORS.risk },
       },
     ],
   };
