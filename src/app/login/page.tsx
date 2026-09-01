@@ -4,7 +4,7 @@ import { LoginForm } from "@/components/auth/LoginForm";
 import { getPageUser } from "@/modules/auth/auth-page";
 
 export const metadata: Metadata = {
-  title: "登录",
+  title: "登录工作台",
   description: "登录 LuminaX 经营分析工作台",
   robots: { index: false, follow: false },
 };
@@ -27,4 +27,3 @@ function sanitizeNextPath(value: string | string[] | undefined): string {
     ? nextPath
     : "/";
 }
-
