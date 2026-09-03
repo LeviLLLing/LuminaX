@@ -30,11 +30,14 @@ export function InsightFindingList({
   onSelectFinding,
 }: InsightFindingListProps) {
   return (
-    <section className="border-b border-[#dedfe2] bg-white px-4 py-5 sm:px-5">
+    <section
+      data-insight-section="findings"
+      className="border-b border-border px-4 py-6 sm:px-6"
+    >
       <h3 className="text-sm font-semibold text-[#17181a]">关键发现</h3>
       <div className="mt-3 divide-y divide-[#e9eaec] border-y border-[#e9eaec]">
         {findings.map((finding) => (
-          <article
+          <div
             key={finding.id}
             aria-current={selectedFindingId === finding.id ? "true" : undefined}
             className={cn(
@@ -67,7 +70,7 @@ export function InsightFindingList({
                 <ChevronRight className="size-4" aria-hidden="true" />
               </button>
             </div>
-          </article>
+          </div>
         ))}
       </div>
     </section>

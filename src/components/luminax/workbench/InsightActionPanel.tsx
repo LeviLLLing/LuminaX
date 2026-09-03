@@ -87,7 +87,10 @@ export function InsightActionPanel({
   const scopeMatches = isInsightScopeActive(activeScope, insight.scope);
 
   return (
-    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+    <article
+      aria-label="洞察与行动"
+      className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-white"
+    >
       {generationStatus === "generating" && (
         <StatusStrip>正在更新洞察，当前内容仍可查看</StatusStrip>
       )}
@@ -113,7 +116,7 @@ export function InsightActionPanel({
         </div>
       )}
 
-      <section className="border-b border-[#dedfe2] bg-white px-4 py-4 sm:px-5">
+      <header className="border-b border-border px-4 py-4 sm:px-6">
         <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-[#666a73]">
           <span className="inline-flex items-center gap-1.5"><Database className="size-3.5" />来源：{insight.sourceQuestion}</span>
           <span className="inline-flex items-center gap-1.5"><Store className="size-3.5" />门店：{insight.scope.storeIds.join("、")}</span>
@@ -121,9 +124,12 @@ export function InsightActionPanel({
           {insight.scope.comparisonLabel && <span>对比：{insight.scope.comparisonLabel}</span>}
           <span>更新：{formatUpdatedAt(insight.updatedAt)}</span>
         </div>
-      </section>
+      </header>
 
-      <section className="border-b border-[#dedfe2] bg-[#fffbea] px-4 py-5 sm:px-5">
+      <section
+        data-insight-section="core"
+        className="border-b border-border bg-[color-mix(in_srgb,var(--luminax-yellow)_10%,white)] px-4 py-6 sm:px-6"
+      >
         <p className="text-xs font-medium text-[#716200]">核心判断</p>
         <h3 className="mt-2 break-words text-lg font-semibold leading-7 text-[#17181a]">
           {insight.headline}
@@ -140,26 +146,33 @@ export function InsightActionPanel({
         highlightedEvidenceIds={highlightedEvidenceIds}
         registerEvidenceRef={registerEvidenceRef}
       />
-      {insight.verificationItems.length > 0 && (
-        <section className="border-b border-[#dedfe2] bg-white px-4 py-5 sm:px-5">
-          <h3 className="text-sm font-semibold text-[#17181a]">待核查项</h3>
+      <section
+        data-insight-section="verification"
+        className="border-b border-border px-4 py-6 sm:px-6"
+      >
+        <h3 className="text-sm font-semibold text-[#17181a]">待核查项</h3>
+        {insight.verificationItems.length > 0 ? (
           <div className="mt-3 divide-y divide-[#e9eaec] border-y border-[#e9eaec]">
             {insight.verificationItems.map((item) => (
-              <article key={item.id} className="grid gap-3 py-4 text-sm sm:grid-cols-3">
+              <div key={item.id} className="grid gap-3 py-4 text-sm sm:grid-cols-3">
                 <VerificationValue label="已观察事实" value={item.observedFact} />
                 <VerificationValue label="可能原因" value={item.hypothesis} />
                 <VerificationValue label="需核查" value={item.requiredCheck} />
-              </article>
+              </div>
             ))}
           </div>
-        </section>
-      )}
+        ) : (
+          <p className="mt-3 border-y border-border py-4 text-sm text-muted-foreground">
+            当前暂无待核查项
+          </p>
+        )}
+      </section>
       <InsightActionChecklist
         actions={insight.actions}
         pendingActionIds={pendingActionIds}
         onToggleAction={onToggleAction}
       />
-    </div>
+    </article>
   );
 }
 

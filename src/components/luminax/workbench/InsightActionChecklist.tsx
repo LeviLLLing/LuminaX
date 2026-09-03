@@ -17,8 +17,11 @@ export function InsightActionChecklist({
   onToggleAction,
 }: InsightActionChecklistProps) {
   return (
-    <section className="bg-white px-4 py-5 sm:px-5">
-      <h3 className="text-sm font-semibold text-[#17181a]">建议行动</h3>
+    <section
+      data-insight-section="actions"
+      className="px-4 py-6 sm:px-6"
+    >
+      <h3 className="text-sm font-semibold text-[#17181a]">行动清单</h3>
       <div className="mt-3 divide-y divide-[#e9eaec] border-y border-[#e9eaec]">
         {actions.map((action) => {
           const pending = pendingActionIds.includes(action.id);

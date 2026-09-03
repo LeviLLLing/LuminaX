@@ -459,6 +459,30 @@ test("insight panel renders verification items and actionable priority states", 
   assert.match(html, /验证指标：销售额/);
 });
 
+test("insight renders one formal article with stable reading sections", () => {
+  const html = renderInsightPanel({ error: "internal database detail" });
+
+  assert.match(html, /<article[^>]*aria-label="洞察与行动"/);
+  assert.equal((html.match(/<article/g) ?? []).length, 1);
+  for (const section of ["core", "findings", "evidence", "verification", "actions"]) {
+    assert.match(html, new RegExp(`data-insight-section="${section}"`));
+  }
+  for (const heading of ["核心判断", "关键发现", "支持证据", "待核查项", "行动清单"]) {
+    assert.match(html, new RegExp(heading));
+  }
+  assert.doesNotMatch(html, /internal database detail/);
+});
+
+test("formal insight keeps the verification section when no checks are pending", () => {
+  const html = renderInsightPanel({
+    insight: { ...insightDto, verificationItems: [] },
+  });
+
+  assert.match(html, /data-insight-section="verification"/);
+  assert.match(html, /待核查项/);
+  assert.match(html, /当前暂无待核查项/);
+});
+
 test("action save failure keeps the snapshot visible with a light warning", () => {
   const html = renderInsightPanel({ error: "Insight action update failed" });
 

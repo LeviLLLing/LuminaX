@@ -12,6 +12,7 @@ import { ProductState } from "../../src/components/luminax/ProductState";
 import { WorkbenchHeader } from "../../src/components/luminax/workbench/WorkbenchHeader";
 import { WorkbenchShell } from "../../src/components/luminax/workbench/WorkbenchShell";
 import { DecisionBrief } from "../../src/components/luminax/workbench/DecisionBrief";
+import { ReportView } from "../../src/components/luminax/workbench/ReportView";
 
 test("product brand and state primitives expose stable semantics", () => {
   const brand = renderToStaticMarkup(
@@ -136,4 +137,17 @@ test("decision brief reports generation without fabricating insight content", ()
   assert.match(html, /正在生成决策简报/);
   assert.doesNotMatch(html, /查看完整洞察/);
   assert.doesNotMatch(html, /项已完成/);
+});
+
+test("formal report surface is distinct from the dashboard", () => {
+  const html = renderToStaticMarkup(
+    createElement(ReportView, {
+      reportHTML: "<!DOCTYPE html><h1>区域经营周报</h1>",
+    })
+  );
+
+  assert.match(html, /<article[^>]*aria-label="经营周报"/);
+  assert.match(html, /正式报告/);
+  assert.equal((html.match(/<article/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /总销售额.*目标达成率.*订单量/);
 });
