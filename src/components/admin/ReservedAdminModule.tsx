@@ -26,24 +26,30 @@ export function ReservedAdminModule({ module }: ReservedAdminModuleProps) {
   const config = MODULES[module];
   const Icon = config.icon;
   return (
-    <section className="p-4 md:p-6 lg:p-8">
+    <section className="p-4 md:p-6 xl:p-8">
       <div className="mx-auto max-w-[1440px]">
         <div className="mb-6 flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold text-zinc-950">{config.title}</h1>
-            <p className="mt-1 text-sm text-zinc-500">模块接口已预留</p>
+            <p className="mb-1 text-xs font-semibold text-[var(--muted-foreground)]">报表配置</p>
+            <h1 className="text-xl font-semibold text-[var(--luminax-ink)]">{config.title}</h1>
+            <p className="mt-1 text-sm text-[var(--muted-foreground)]">模块接口已预留，当前无可用配置</p>
           </div>
-          <Button disabled className="bg-[#18181b] text-white">
+          <Button disabled className="h-11 bg-[var(--luminax-ink)] text-white">
             <Icon className="size-4" />
             {config.action}
           </Button>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-          <div className="grid min-w-[720px] grid-cols-5 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold text-zinc-600">
-            {config.columns.map((column) => (
-              <span key={column}>{column}</span>
-            ))}
+        <div
+          data-admin-table-state="empty"
+          className="overflow-hidden rounded-md border border-[var(--border)] bg-white"
+        >
+          <div className="overflow-x-auto">
+            <div className="grid min-w-[720px] grid-cols-5 border-b border-[var(--border)] bg-[var(--muted)] px-4 py-3 text-xs font-semibold text-[var(--muted-foreground)]">
+              {config.columns.map((column) => (
+                <span key={column}>{column}</span>
+              ))}
+            </div>
           </div>
           <div className="grid min-h-72 place-items-center px-6 text-center">
             <div>

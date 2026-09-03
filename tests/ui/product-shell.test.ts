@@ -13,6 +13,8 @@ import { WorkbenchHeader } from "../../src/components/luminax/workbench/Workbenc
 import { WorkbenchShell } from "../../src/components/luminax/workbench/WorkbenchShell";
 import { DecisionBrief } from "../../src/components/luminax/workbench/DecisionBrief";
 import { ReportView } from "../../src/components/luminax/workbench/ReportView";
+import { AdminShell } from "../../src/components/admin/AdminShell";
+import { ReservedAdminModule } from "../../src/components/admin/ReservedAdminModule";
 
 test("product brand and state primitives expose stable semantics", () => {
   const brand = renderToStaticMarkup(
@@ -150,4 +152,34 @@ test("formal report surface is distinct from the dashboard", () => {
   assert.match(html, /正式报告/);
   assert.equal((html.match(/<article/g) ?? []).length, 1);
   assert.doesNotMatch(html, /总销售额.*目标达成率.*订单量/);
+});
+
+test("admin shell exposes modular navigation and work-focused content", () => {
+  const html = renderToStaticMarkup(
+    createElement(AdminShell, {
+      user: {
+        id: "admin",
+        username: "admin",
+        displayName: "系统管理员",
+        role: "super_admin",
+      },
+    })
+  );
+
+  assert.match(html, /aria-label="管理模块"/);
+  assert.match(html, /指标注册/);
+  assert.match(html, /权限管理/);
+  assert.match(html, /报表管理/);
+  assert.match(html, /报表设置/);
+  assert.match(html, /data-admin-layout="capability-navigation"/);
+});
+
+test("reserved admin modules use a table empty state", () => {
+  const html = renderToStaticMarkup(
+    createElement(ReservedAdminModule, { module: "reports" })
+  );
+
+  assert.match(html, /报表名称/);
+  assert.match(html, /暂无配置/);
+  assert.doesNotMatch(html, /功能即将上线|敬请期待/);
 });

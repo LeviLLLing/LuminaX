@@ -354,51 +354,66 @@ export function MetricRegistryPanel() {
   }
 
   return (
-    <section className="p-4 md:p-6 lg:p-8">
+    <section className="p-4 md:p-6 xl:p-8" aria-busy={Boolean(busyAction)}>
       <div className="mx-auto max-w-[1440px]">
-        <div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <h1 className="text-xl font-semibold text-zinc-950">指标注册表</h1>
-            <p className="mt-1 text-sm text-zinc-500">固定指标与管理员发布指标</p>
+            <p className="mb-1 text-xs font-semibold text-[var(--muted-foreground)]">指标治理</p>
+            <h1 className="text-xl font-semibold text-[var(--luminax-ink)]">指标注册表</h1>
+            <p className="mt-1 text-sm text-[var(--muted-foreground)]">固定指标与管理员发布指标</p>
           </div>
-          <Button onClick={openCreate} className="bg-[#18181b] text-white hover:bg-zinc-800">
+          <Button
+            onClick={openCreate}
+            className="h-11 bg-[var(--luminax-ink)] px-4 text-white hover:bg-black"
+          >
             <Plus className="size-4" />
             新增指标
           </Button>
         </div>
 
-        <div className="mb-5 grid grid-cols-2 border border-zinc-200 bg-white sm:grid-cols-4">
+        <div className="mb-5 grid grid-cols-2 overflow-hidden rounded-md border border-[var(--border)] bg-white sm:grid-cols-4">
           <SummaryItem label="全部指标" value={summary.total} />
           <SummaryItem label="系统内置" value={summary.system} />
           <SummaryItem label="已发布" value={summary.published} tone="success" />
           <SummaryItem label="待处理" value={summary.pending} tone="warning" />
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-          <div className="flex flex-col gap-3 border-b border-zinc-200 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative w-full sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="搜索指标名称或编码"
-                className="pl-9"
-              />
+        <div className="overflow-hidden rounded-md border border-[var(--border)] bg-white">
+          <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="w-full space-y-1.5 sm:max-w-sm">
+              <Label htmlFor="metric-search" className="text-xs text-[var(--muted-foreground)]">
+                搜索指标
+              </Label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+                <Input
+                  id="metric-search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="名称、编码或别名"
+                  className="h-11 pl-9"
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Select value={originFilter} onValueChange={(value) => setOriginFilter(value as typeof originFilter)}>
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部来源</SelectItem>
-                  <SelectItem value="system">系统内置</SelectItem>
-                  <SelectItem value="custom">管理员创建</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="flex items-end gap-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="metric-origin" className="text-xs text-[var(--muted-foreground)]">
+                  指标来源
+                </Label>
+                <Select value={originFilter} onValueChange={(value) => setOriginFilter(value as typeof originFilter)}>
+                  <SelectTrigger id="metric-origin" className="h-11 w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部来源</SelectItem>
+                    <SelectItem value="system">系统内置</SelectItem>
+                    <SelectItem value="custom">管理员创建</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" onClick={() => void loadMetrics()} disabled={loading}>
+                  <Button className="size-11" variant="outline" size="icon" onClick={() => void loadMetrics()} disabled={loading}>
                     <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
                     <span className="sr-only">刷新</span>
                   </Button>
@@ -616,7 +631,7 @@ export function MetricRegistryPanel() {
                 />
 
                 {authoringNote && (
-                  <div className="border-l-2 border-[#FFE600] bg-yellow-50 px-3 py-2 text-xs leading-5 text-zinc-600">
+                  <div aria-live="polite" className="border-l-2 border-[var(--luminax-yellow)] bg-yellow-50 px-3 py-2 text-xs leading-5 text-zinc-600">
                     {authoringNote}
                   </div>
                 )}
@@ -628,12 +643,12 @@ export function MetricRegistryPanel() {
           </div>
 
           <DialogFooter className="border-t border-zinc-200 px-5 py-3">
-            <Button variant="outline" onClick={() => setEditorOpen(false)}>关闭</Button>
-            <Button variant="outline" onClick={() => void handleSave()} disabled={Boolean(busyAction)}>
+            <Button className="h-11" variant="outline" onClick={() => setEditorOpen(false)}>关闭</Button>
+            <Button className="h-11" variant="outline" onClick={() => void handleSave()} disabled={Boolean(busyAction)}>
               {busyAction === "save" ? <Loader2 className="animate-spin" /> : <Save />}
               保存草稿
             </Button>
-            <Button onClick={() => void handlePublish()} disabled={!form.sqlTemplate || Boolean(busyAction)} className="bg-[#18181b] text-white hover:bg-zinc-800">
+            <Button onClick={() => void handlePublish()} disabled={!form.sqlTemplate || Boolean(busyAction)} className="h-11 bg-[var(--luminax-ink)] text-white hover:bg-black">
               {busyAction === "publish" ? <Loader2 className="animate-spin" /> : <Rocket />}
               发布指标
             </Button>
