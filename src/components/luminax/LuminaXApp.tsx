@@ -96,6 +96,10 @@ export function LuminaXApp({ user }: { user: AuthenticatedUser }) {
       }
       assistantPanel={
         <AssistantPanel
+          insight={latestInsight.insight}
+          insightGenerationStatus={latestInsight.generationStatus}
+          pendingInsightActionIds={latestInsight.pendingActionIds}
+          assistantMode={presentationProfile.assistantMode}
           messages={chat.messages}
           inputValue={chat.inputValue}
           isStreaming={chat.isStreaming}
@@ -104,6 +108,7 @@ export function LuminaXApp({ user }: { user: AuthenticatedUser }) {
           chatAreaRef={chat.chatAreaRef}
           onInputChange={chat.setInputValue}
           onSendMessage={chat.sendMessage}
+          onOpenInsight={() => controller.setInsightView("analysis")}
         />
       }
     />

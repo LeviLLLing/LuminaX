@@ -11,6 +11,7 @@ import { ProductBrandBar } from "../../src/components/luminax/ProductBrandBar";
 import { ProductState } from "../../src/components/luminax/ProductState";
 import { WorkbenchHeader } from "../../src/components/luminax/workbench/WorkbenchHeader";
 import { WorkbenchShell } from "../../src/components/luminax/workbench/WorkbenchShell";
+import { DecisionBrief } from "../../src/components/luminax/workbench/DecisionBrief";
 
 test("product brand and state primitives expose stable semantics", () => {
   const brand = renderToStaticMarkup(
@@ -119,4 +120,20 @@ test("workbench lifecycle feedback uses shared product states", () => {
   assert.match(loading, /data-product-state="loading"/);
   assert.match(error, /data-product-state="error"/);
   assert.match(error, /重新加载/);
+});
+
+test("decision brief reports generation without fabricating insight content", () => {
+  const html = renderToStaticMarkup(
+    createElement(DecisionBrief, {
+      insight: null,
+      generationStatus: "generating",
+      pendingActionIds: [],
+      assistantMode: "summary_first",
+      onOpenInsight: () => undefined,
+    })
+  );
+
+  assert.match(html, /正在生成决策简报/);
+  assert.doesNotMatch(html, /查看完整洞察/);
+  assert.doesNotMatch(html, /项已完成/);
 });

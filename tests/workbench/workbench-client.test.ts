@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createElement } from "react";
+import { createElement, createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { AssistantPanel } from "../../src/components/luminax/workbench/AssistantPanel";
+import { DecisionBrief } from "../../src/components/luminax/workbench/DecisionBrief";
+import { OverviewPanel } from "../../src/components/luminax/workbench/OverviewPanel";
 import { ScopeBar } from "../../src/components/luminax/workbench/ScopeBar";
 import { InsightCanvas } from "../../src/components/luminax/workbench/InsightCanvas";
 import { InsightActionPanel } from "../../src/components/luminax/workbench/InsightActionPanel";
@@ -20,6 +23,7 @@ import {
 } from "../../src/modules/workbench/workbench-presentation";
 import { createWorkbenchContextRequestLifecycle } from "../../src/hooks/workbench-context-lifecycle";
 import type { WorkbenchContext } from "../../src/modules/workbench/workbench-types";
+import type { DataSummary } from "../../src/modules/domain/analysis-types";
 import {
   ReportClientError,
   requestWeeklyReport,
@@ -327,6 +331,87 @@ test("insight panel keeps an old snapshot visible while generating", () => {
 
   assert.match(html, /正在更新洞察/);
   assert.match(html, new RegExp(insightDto.headline));
+});
+
+test("decision brief summarizes without duplicating the formal insight", () => {
+  const html = renderToStaticMarkup(createElement(DecisionBrief, {
+    insight: insightDto,
+    generationStatus: "idle",
+    pendingActionIds: [],
+    assistantMode: "action_first",
+    onOpenInsight: () => undefined,
+  }));
+  assert.match(html, new RegExp(insightDto.headline));
+  assert.match(html, /1\/3 项已完成/);
+  assert.match(html, /查看完整洞察/);
+  assert.doesNotMatch(html, /观察次周表现/);
+  assert.doesNotMatch(html, /晚间销售低于对照周期/);
+  assert.doesNotMatch(html, /8月1日销售额低于上周同期/);
+});
+
+test("assistant keeps the complete markdown analysis below the decision brief", () => {
+  const completeAnalysis = [
+    "## 整体趋势",
+    "所有门店销售表现已经完成分析。",
+    "## 门店明细",
+    "地铁站店和社区中心店需要关注，上海商场店高于目标。",
+    "## 经营建议",
+    "先复核客流、转化率和排班，再制定改善动作。",
+  ].join("\n");
+  const html = renderToStaticMarkup(createElement(AssistantPanel, {
+    insight: insightDto,
+    insightGenerationStatus: "idle",
+    pendingInsightActionIds: [],
+    assistantMode: "action_first",
+    onOpenInsight: () => undefined,
+    messages: [{ role: "ai", content: completeAnalysis }],
+    inputValue: "",
+    isStreaming: false,
+    status: null,
+    suggestions: [],
+    chatAreaRef: createRef<HTMLDivElement>(),
+    onInputChange: () => undefined,
+    onSendMessage: () => undefined,
+  }));
+
+  assert.match(html, new RegExp(insightDto.headline));
+  assert.ok(html.indexOf(insightDto.headline) < html.indexOf("整体趋势"));
+  assert.match(html, /所有门店销售表现已经完成分析。/);
+  assert.match(html, /地铁站店和社区中心店需要关注，上海商场店高于目标。/);
+  assert.match(html, /先复核客流、转化率和排班，再制定改善动作。/);
+});
+
+test("overview separates authorized KPIs from chart reading surfaces", () => {
+  const dataSummary: DataSummary = {
+    dateRange: { start: "2026-08-01", end: "2026-08-07" },
+    stores: ["S001"],
+    salesSummary: {
+      totalSales: 120000,
+      totalOrders: 1200,
+      totalTarget: 100000,
+      achievementRate: "120.0%",
+      avgOrderValue: 100,
+    },
+    channelBreakdown: {},
+    categoryBreakdown: {},
+    daypartBreakdown: {},
+    refundSummary: { totalRefund: 0, totalCancelled: 0 },
+    managerFeedback: [],
+  };
+  const html = renderToStaticMarkup(createElement(OverviewPanel, {
+    profile: getWorkbenchPresentationProfile("regional_manager"),
+    availableMetricCodes: ["compare"],
+    dataSummary,
+    chartOptions: {} as DashboardChartOptions,
+  }));
+
+  assert.match(html, /data-overview-section="kpis"/);
+  assert.match(html, /data-overview-section="charts"/);
+  assert.match(html, /关键指标/);
+  assert.match(html, /趋势与结构/);
+  assert.ok(html.indexOf("关键指标") < html.indexOf("趋势与结构"));
+  assert.match(html, /¥12.0万/);
+  assert.match(html, /120.0%/);
 });
 
 test("scope mismatch offers an explicit restore command", () => {
