@@ -63,6 +63,7 @@ export function InsightFindingList({
               </span>
               <button
                 type="button"
+                aria-label={`查看证据：${finding.title}`}
                 onClick={() => onSelectFinding(finding)}
                 className="inline-flex items-center gap-1 rounded-[8px] px-2 py-2 text-xs font-medium text-[#303238] hover:bg-[#e9eaec] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
               >

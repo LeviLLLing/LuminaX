@@ -447,7 +447,7 @@ export function PermissionManagementPanel() {
                                 </Badge>
                               )}
                             </div>
-                            <div className="truncate font-mono text-xs text-zinc-400">
+                            <div className="truncate font-mono text-xs text-muted-foreground">
                               {user.username}
                             </div>
                           </div>
@@ -462,14 +462,16 @@ export function PermissionManagementPanel() {
                       <TableCell>{user.system ? "全部" : columnCount}</TableCell>
                       <TableCell>{user.system ? "全部" : `${storeCount} 家`}</TableCell>
                       <TableCell>
-                        <Switch
-                          checked={user.status === "active"}
-                          disabled={user.system || busyAction === `status:${user.id}`}
-                          onCheckedChange={(checked) =>
-                            void toggleStatus(user, checked)
-                          }
-                          aria-label={`${user.displayName}启用状态`}
-                        />
+                        <label className="inline-flex min-h-11 min-w-11 items-center justify-center md:min-h-0 md:min-w-0">
+                          <Switch
+                            checked={user.status === "active"}
+                            disabled={user.system || busyAction === `status:${user.id}`}
+                            onCheckedChange={(checked) =>
+                              void toggleStatus(user, checked)
+                            }
+                            aria-label={`${user.displayName}启用状态`}
+                          />
+                        </label>
                       </TableCell>
                       <TableCell className="pr-4 text-right">
                         {!user.system && (
@@ -747,7 +749,7 @@ export function PermissionManagementPanel() {
                             <h3 className="truncate text-sm font-semibold text-zinc-900">
                               {selectedCatalogTable.label}
                             </h3>
-                            <p className="truncate font-mono text-xs text-zinc-400">
+                            <p className="truncate font-mono text-xs text-muted-foreground">
                               {selectedCatalogTable.name}
                             </p>
                           </div>
@@ -934,7 +936,7 @@ function PolicySection({
         <div className="flex items-center gap-2 text-sm font-medium text-zinc-800">
           <Icon className="size-4 text-zinc-500" />
           {title}
-          <span className="text-xs font-normal text-zinc-400">
+          <span className="text-xs font-normal text-muted-foreground">
             {selected}/{total}
           </span>
         </div>

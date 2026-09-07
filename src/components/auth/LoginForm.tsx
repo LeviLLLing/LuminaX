@@ -95,7 +95,7 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
                   autoComplete="current-password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  className="h-11 px-9"
+                  className="h-11 pl-9 pr-12"
                   placeholder="请输入密码"
                 />
                 <button

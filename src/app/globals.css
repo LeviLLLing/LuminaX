@@ -140,6 +140,21 @@
   }
 }
 
+/* Keep compact desktop controls, with full touch targets on mobile surfaces. */
+@media (width < 48rem) {
+  :where([data-workbench-shell], [data-admin-layout]) :is(
+    button:not([role="checkbox"], [role="switch"]),
+    a[href],
+    input:not([type="checkbox"]),
+    select,
+    [role="combobox"]
+  ),
+  [data-slot="dropdown-menu-content"] :is([role="menuitem"], [role="menuitemcheckbox"]) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

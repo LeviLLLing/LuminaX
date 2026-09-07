@@ -48,7 +48,7 @@ export function InsightActionChecklist({
                 <span
                   className={cn(
                     "break-words text-sm font-medium text-[#17181a]",
-                    action.completed && "text-[#777b84] line-through"
+                    action.completed && "text-muted-foreground line-through"
                   )}
                 >
                   {action.title}

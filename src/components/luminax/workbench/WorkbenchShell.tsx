@@ -24,7 +24,7 @@ export function WorkbenchShell({
   const [assistantCollapsed, setAssistantCollapsed] = useState(false);
 
   return (
-    <div className="flex h-dvh min-h-[560px] flex-col overflow-hidden bg-[var(--luminax-canvas)] text-foreground">
+    <div data-workbench-shell="true" className="flex h-dvh min-h-[560px] flex-col overflow-hidden bg-[var(--luminax-canvas)] text-foreground">
       {header}
       <MobilePaneSwitch value={mobilePane} onChange={setMobilePane} />
 

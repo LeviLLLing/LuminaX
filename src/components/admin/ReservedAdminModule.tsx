@@ -41,23 +41,34 @@ export function ReservedAdminModule({ module }: ReservedAdminModuleProps) {
         </div>
 
         <div
-          data-admin-table-state="empty"
-          className="overflow-hidden rounded-md border border-[var(--border)] bg-white"
+          className="overflow-x-auto rounded-md border border-[var(--border)] bg-white"
+          style={{ containerType: "inline-size" }}
         >
-          <div className="overflow-x-auto">
-            <div className="grid min-w-[720px] grid-cols-5 border-b border-[var(--border)] bg-[var(--muted)] px-4 py-3 text-xs font-semibold text-[var(--muted-foreground)]">
-              {config.columns.map((column) => (
-                <span key={column}>{column}</span>
-              ))}
-            </div>
-          </div>
-          <div className="grid min-h-72 place-items-center px-6 text-center">
-            <div>
-              <Icon className="mx-auto mb-3 size-8 text-zinc-300" />
-              <p className="text-sm font-medium text-zinc-700">暂无配置</p>
-              <p className="mt-1 text-xs text-zinc-400">等待对应管理模块接入</p>
-            </div>
-          </div>
+          <table
+            data-admin-table-state="empty"
+            className="w-full min-w-[720px] border-collapse text-left"
+          >
+            <thead className="border-b border-[var(--border)] bg-[var(--muted)] text-xs font-semibold text-[var(--muted-foreground)]">
+              <tr>
+                {config.columns.map((column) => (
+                  <th key={column} scope="col" className="px-4 py-3 font-semibold">
+                    {column}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colSpan={config.columns.length} className="p-0">
+                  <div className="sticky left-0 grid h-72 w-[100cqw] content-center justify-items-center px-6 text-center">
+                    <Icon className="mx-auto mb-3 size-8 text-zinc-300" aria-hidden="true" />
+                    <p className="text-sm font-medium text-zinc-700">暂无配置</p>
+                    <p className="mt-1 text-xs text-muted-foreground">等待对应管理模块接入</p>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </section>

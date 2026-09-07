@@ -246,7 +246,7 @@ function InsightAccessError({ message }: { message: string }) {
 function VerificationValue({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-xs font-medium text-[#777b84]">{label}</p>
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <p className="mt-1 break-words leading-6 text-[#303238]">{value}</p>
     </div>
   );

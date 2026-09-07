@@ -349,6 +349,30 @@ test("decision brief summarizes without duplicating the formal insight", () => {
   assert.doesNotMatch(html, /8月1日销售额低于上周同期/);
 });
 
+test("summary-first changes decision brief order without changing its content", () => {
+  const actionFirst = renderToStaticMarkup(createElement(DecisionBrief, {
+    insight: insightDto,
+    generationStatus: "idle",
+    pendingActionIds: [],
+    assistantMode: "action_first",
+    onOpenInsight: () => undefined,
+  }));
+  const summaryFirst = renderToStaticMarkup(createElement(DecisionBrief, {
+    insight: insightDto,
+    generationStatus: "idle",
+    pendingActionIds: [],
+    assistantMode: "summary_first",
+    onOpenInsight: () => undefined,
+  }));
+
+  assert.ok(actionFirst.indexOf('data-decision-brief-section="actions"') < actionFirst.indexOf('data-decision-brief-section="summary"'));
+  assert.ok(summaryFirst.indexOf('data-decision-brief-section="summary"') < summaryFirst.indexOf('data-decision-brief-section="actions"'));
+  for (const content of [insightDto.headline, "1/3 项已完成", "复核晚间排班", "检查活动执行", "查看完整洞察"]) {
+    assert.match(actionFirst, new RegExp(content));
+    assert.match(summaryFirst, new RegExp(content));
+  }
+});
+
 test("assistant keeps the complete markdown analysis below the decision brief", () => {
   const completeAnalysis = [
     "## 整体趋势",
@@ -379,6 +403,53 @@ test("assistant keeps the complete markdown analysis below the decision brief", 
   assert.match(html, /所有门店销售表现已经完成分析。/);
   assert.match(html, /地铁站店和社区中心店需要关注，上海商场店高于目标。/);
   assert.match(html, /先复核客流、转化率和排班，再制定改善动作。/);
+});
+
+test("assistant preserves multi-message order and complete markdown after insight updates", () => {
+  const html = renderToStaticMarkup(createElement(AssistantPanel, {
+    insight: insightDto,
+    insightGenerationStatus: "idle",
+    pendingInsightActionIds: [],
+    assistantMode: "summary_first",
+    onOpenInsight: () => undefined,
+    messages: [
+      { role: "user", content: "分析全部门店" },
+      { role: "system", content: "已应用授权范围" },
+      { role: "ai", content: "## 整体趋势\n销售分析完整正文。\n\n- 地铁站店需要关注\n- 商场店高于目标" },
+      { role: "user", content: "继续给出行动" },
+      { role: "ai", content: "## 行动建议\n1. 复核客流\n2. 调整排班\n3. 验证销售额" },
+    ],
+    inputValue: "",
+    isStreaming: false,
+    status: null,
+    suggestions: [],
+    chatAreaRef: createRef<HTMLDivElement>(),
+    onInputChange: () => undefined,
+    onSendMessage: () => undefined,
+  }));
+
+  const orderedContent = [
+    "分析全部门店",
+    "已应用授权范围",
+    "整体趋势",
+    "销售分析完整正文。",
+    "地铁站店需要关注",
+    "商场店高于目标",
+    "继续给出行动",
+    "行动建议",
+    "复核客流",
+    "调整排班",
+    "验证销售额",
+  ];
+  let cursor = -1;
+  for (const content of orderedContent) {
+    const next = html.indexOf(content);
+    assert.ok(next > cursor, `${content} should remain in message order`);
+    cursor = next;
+  }
+  assert.match(html, /<h2[^>]*>整体趋势<\/h2>/);
+  assert.match(html, /<li[^>]*>地铁站店需要关注<\/li>/);
+  assert.match(html, /<h2[^>]*>行动建议<\/h2>/);
 });
 
 test("overview separates authorized KPIs from chart reading surfaces", () => {
@@ -471,6 +542,7 @@ test("insight renders one formal article with stable reading sections", () => {
     assert.match(html, new RegExp(heading));
   }
   assert.doesNotMatch(html, /internal database detail/);
+  assert.match(html, /aria-label="查看证据：晚间销售承压"/);
 });
 
 test("formal insight keeps the verification section when no checks are pending", () => {

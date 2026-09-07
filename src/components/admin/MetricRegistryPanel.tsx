@@ -453,7 +453,7 @@ export function MetricRegistryPanel() {
                   <TableRow key={metric.id}>
                     <TableCell className="pl-4">
                       <div className="font-medium text-zinc-900">{metric.name}</div>
-                      <div className="mt-0.5 font-mono text-xs text-zinc-400">{metric.code}</div>
+                      <div className="mt-0.5 font-mono text-xs text-muted-foreground">{metric.code}</div>
                     </TableCell>
                     <TableCell>{CATEGORY_LABELS[metric.category]}</TableCell>
                     <TableCell>
@@ -470,14 +470,16 @@ export function MetricRegistryPanel() {
                     </TableCell>
                     <TableCell><StatusBadge status={metric.status} /></TableCell>
                     <TableCell>
-                      <Switch
-                        checked={metric.status === "system" || metric.status === "published"}
-                        disabled={metric.origin === "system" || busyAction === `toggle:${metric.id}`}
-                        onCheckedChange={(checked) =>
-                          metric.origin === "custom" && void handleToggle(metric, checked)
-                        }
-                        aria-label={`${metric.name}启用状态`}
-                      />
+                      <label className="inline-flex min-h-11 min-w-11 items-center justify-center md:min-h-0 md:min-w-0">
+                        <Switch
+                          checked={metric.status === "system" || metric.status === "published"}
+                          disabled={metric.origin === "system" || busyAction === `toggle:${metric.id}`}
+                          onCheckedChange={(checked) =>
+                            metric.origin === "custom" && void handleToggle(metric, checked)
+                          }
+                          aria-label={`${metric.name}启用状态`}
+                        />
+                      </label>
                     </TableCell>
                     <TableCell className="pr-4 text-right">
                       {metric.origin === "custom" && (
@@ -728,7 +730,7 @@ function TestResultTable({ result }: { result: MetricQueryResult }) {
     <div className="overflow-hidden rounded-md border border-zinc-200">
       <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
         <span className="font-medium text-zinc-700">试运行结果</span>
-        <span className="text-zinc-400">{result.rowCount} 行</span>
+        <span className="text-muted-foreground">{result.rowCount} 行</span>
       </div>
       <Table>
         <TableHeader><TableRow>{result.columns.map((column) => <TableHead key={column}>{column}</TableHead>)}</TableRow></TableHeader>
