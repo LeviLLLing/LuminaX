@@ -610,7 +610,7 @@ export function PermissionManagementPanel() {
       </div>
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden sm:max-w-6xl">
+        <DialogContent data-admin-editor="permission" className="flex max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden sm:max-w-6xl">
           <DialogHeader>
             <DialogTitle>{form.id ? "编辑用户权限" : "新增用户"}</DialogTitle>
             <DialogDescription>配置数据表、字段与门店数据范围</DialogDescription>
@@ -685,7 +685,7 @@ export function PermissionManagementPanel() {
                 </Select>
               </div>
               <div className="flex items-center justify-between border-y border-zinc-200 py-3">
-                <Label htmlFor="permission-active">启用用户</Label>
+                <Label className="flex min-h-11 items-center md:min-h-0" htmlFor="permission-active">启用用户</Label>
                 <Switch
                   id="permission-active"
                   checked={form.status === "active"}
@@ -720,13 +720,15 @@ export function PermissionManagementPanel() {
                               : "text-zinc-600 hover:bg-white/70"
                           }`}
                         >
-                          <Checkbox
-                            checked={granted}
-                            onCheckedChange={(checked) =>
-                              toggleTable(table.name, Boolean(checked))
-                            }
-                            aria-label={`授权 ${table.label}`}
-                          />
+                          <label className="grid min-h-11 min-w-11 place-items-center md:min-h-0 md:min-w-0">
+                            <Checkbox
+                              checked={granted}
+                              onCheckedChange={(checked) =>
+                                toggleTable(table.name, Boolean(checked))
+                              }
+                              aria-label={`授权 ${table.label}`}
+                            />
+                          </label>
                           <button
                             type="button"
                             className="min-w-0 flex-1 truncate text-left"
@@ -959,7 +961,7 @@ function PolicyCheckbox({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex min-h-9 min-w-0 items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50">
+    <label className="flex min-h-11 min-w-0 items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 md:min-h-9">
       <Checkbox
         checked={checked}
         onCheckedChange={(value) => onCheckedChange(Boolean(value))}

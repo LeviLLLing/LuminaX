@@ -519,7 +519,7 @@ export function MetricRegistryPanel() {
       </div>
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="flex h-[92dvh] max-h-[920px] w-[calc(100%-1rem)] max-w-[1180px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1180px]">
+        <DialogContent data-admin-editor="metric" className="flex h-[92dvh] max-h-[920px] w-[calc(100%-1rem)] max-w-[1180px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1180px]">
           <DialogHeader className="border-b border-zinc-200 px-5 py-4">
             <DialogTitle>{form.id ? "编辑指标" : "新增指标"}</DialogTitle>
             <DialogDescription className="flex items-center gap-2">
@@ -577,7 +577,7 @@ export function MetricRegistryPanel() {
                   {METRIC_SOURCE_TABLES.map((table) => {
                     const selected = form.requestedTables.includes(table);
                     return (
-                      <label key={table} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md border border-zinc-200 px-3 py-2 text-xs hover:bg-zinc-50">
+                      <label key={table} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-zinc-200 px-3 py-2 text-xs hover:bg-zinc-50 md:min-h-9">
                         <Checkbox
                           checked={selected}
                           onCheckedChange={(checked) =>
@@ -775,7 +775,7 @@ function MetricInsightPolicyFields({
       <div className="flex min-h-10 items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-2">
           <Scale aria-hidden="true" className="size-4 shrink-0 text-zinc-500" />
-          <Label id="metric-insight-policy-label" htmlFor="metric-insight-policy">
+          <Label className="flex min-h-11 items-center md:min-h-0" id="metric-insight-policy-label" htmlFor="metric-insight-policy">
             洞察判断
           </Label>
         </div>

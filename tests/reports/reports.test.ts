@@ -9,8 +9,20 @@ import { generateWeeklyReportHTML } from "../../src/modules/reports/report-engin
 import { escapeReportHtml } from "../../src/modules/reports/report-html-escape";
 import { generateReportInsights } from "../../src/modules/reports/report-insight-generator";
 import type { ReportInsights } from "../../src/modules/reports/report-model";
+import { WEEKLY_REPORT_STYLES } from "../../src/modules/reports/report-styles";
 
 const jsonDataSource = new JsonSalesDataSource();
+
+test("weekly report styles keep secondary copy readable and chart columns mobile-safe", () => {
+  assert.match(WEEKLY_REPORT_STYLES, /\.kpi-label \{[^}]*color: #666;/);
+  assert.match(WEEKLY_REPORT_STYLES, /\.footer \{[^}]*color: #666;/);
+  assert.match(
+    WEEKLY_REPORT_STYLES,
+    /\.chart-col \{[^}]*min-width: min\(380px, 100%\);/
+  );
+  assert.doesNotMatch(WEEKLY_REPORT_STYLES, /color: #888|color: #999/);
+  assert.doesNotMatch(WEEKLY_REPORT_STYLES, /min-width: 380px/);
+});
 
 test("report application enforces the complete server-side report scope", async () => {
   const salesData = await jsonDataSource.loadSalesData();

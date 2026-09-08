@@ -17,7 +17,7 @@ import { ReportView } from "../../src/components/luminax/workbench/ReportView";
 import { AdminShell } from "../../src/components/admin/AdminShell";
 import { ReservedAdminModule } from "../../src/components/admin/ReservedAdminModule";
 
-test("mobile product surfaces reserve 44px control hit areas without enlarging desktop controls", async () => {
+test("mobile product surfaces and portaled admin editors reserve 44px targets", async () => {
   const css = await readFile("src/app/globals.css", "utf8");
   const shell = renderToStaticMarkup(createElement(WorkbenchShell, {
     header: null, scopeBar: null, dataPanel: null, assistantPanel: null,
@@ -25,8 +25,23 @@ test("mobile product surfaces reserve 44px control hit areas without enlarging d
   assert.match(shell, /data-workbench-shell="true"/);
   assert.match(css, /@media \(width < 48rem\)/);
   assert.match(css, /:where\(\[data-workbench-shell\], \[data-admin-layout\]\)/);
+  assert.match(css, /\[data-admin-editor\]/);
+  assert.match(css, /\[data-slot="select-content"\]/);
   assert.match(css, /min-height: 44px/);
   assert.match(css, /min-width: 44px/);
+});
+
+test("metric and permission editors identify mobile control and binary-label boundaries", async () => {
+  const [metrics, permissions] = await Promise.all([
+    readFile("src/components/admin/MetricRegistryPanel.tsx", "utf8"),
+    readFile("src/components/admin/PermissionManagementPanel.tsx", "utf8"),
+  ]);
+
+  assert.match(metrics, /data-admin-editor="metric"/);
+  assert.match(permissions, /data-admin-editor="permission"/);
+  assert.match(metrics, /<Label className="[^"]*min-h-11[^"]*md:min-h-0[^"]*"[^>]*htmlFor="metric-insight-policy"/);
+  assert.match(permissions, /<Label className="[^"]*min-h-11[^"]*md:min-h-0[^"]*"[^>]*htmlFor="permission-active"/);
+  assert.match(permissions, /min-h-11[^\"]*md:min-h-9/);
 });
 
 test("product brand and state primitives expose stable semantics", () => {

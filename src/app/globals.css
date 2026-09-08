@@ -149,7 +149,15 @@
     select,
     [role="combobox"]
   ),
-  [data-slot="dropdown-menu-content"] :is([role="menuitem"], [role="menuitemcheckbox"]) {
+  [data-admin-editor] :is(
+    button:not([role="checkbox"], [role="switch"]),
+    input:not([type="checkbox"]),
+    textarea,
+    select,
+    [role="combobox"]
+  ),
+  [data-slot="dropdown-menu-content"] :is([role="menuitem"], [role="menuitemcheckbox"]),
+  [data-slot="select-content"] [role="option"] {
     min-height: 44px;
     min-width: 44px;
   }
