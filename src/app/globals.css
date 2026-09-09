@@ -152,7 +152,6 @@
   [data-admin-editor] :is(
     button:not([role="checkbox"], [role="switch"]),
     input:not([type="checkbox"]),
-    textarea,
     select,
     [role="combobox"]
   ),

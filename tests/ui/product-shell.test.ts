@@ -31,6 +31,20 @@ test("mobile product surfaces and portaled admin editors reserve 44px targets", 
   assert.match(css, /min-width: 44px/);
 });
 
+test("admin editor touch-target override excludes textareas with explicit height", async () => {
+  const css = await readFile("src/app/globals.css", "utf8");
+  const editorSelector = css.match(
+    /\[data-admin-editor\] :is\(([\s\S]*?)\),\s*\[data-slot="dropdown-menu-content"\]/
+  );
+
+  assert.ok(editorSelector, "admin editor mobile selector is missing");
+  assert.match(editorSelector[1], /button:not\(\[role="checkbox"\], \[role="switch"\]\)/);
+  assert.match(editorSelector[1], /input:not\(\[type="checkbox"\]\)/);
+  assert.match(editorSelector[1], /select/);
+  assert.match(editorSelector[1], /\[role="combobox"\]/);
+  assert.doesNotMatch(editorSelector[1], /textarea/);
+});
+
 test("metric and permission editors identify mobile control and binary-label boundaries", async () => {
   const [metrics, permissions] = await Promise.all([
     readFile("src/components/admin/MetricRegistryPanel.tsx", "utf8"),
