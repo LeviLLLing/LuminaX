@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createElement } from "react";
+import { createElement, createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { AssistantPanel } from "../../src/components/luminax/workbench/AssistantPanel";
+import { DecisionBrief } from "../../src/components/luminax/workbench/DecisionBrief";
+import { OverviewPanel } from "../../src/components/luminax/workbench/OverviewPanel";
 import { ScopeBar } from "../../src/components/luminax/workbench/ScopeBar";
 import { InsightCanvas } from "../../src/components/luminax/workbench/InsightCanvas";
 import { InsightActionPanel } from "../../src/components/luminax/workbench/InsightActionPanel";
@@ -11,13 +14,22 @@ import {
 } from "../../src/modules/workbench/workbench-context-client";
 import { authorizeIntentMetadata } from "../../src/modules/workbench/workbench-intent-policy";
 import {
+  createExpandedInsightSections,
   getMetricLabel,
+  getOrderedInsightSections,
   getSuggestedQuestions,
   getVisibleInsightSections,
   getWorkbenchCopy,
+  getWorkbenchPresentationProfile,
+  syncExpandedInsightSections,
+  toggleExpandedInsightSection,
 } from "../../src/modules/workbench/workbench-presentation";
-import { createWorkbenchContextRequestLifecycle } from "../../src/hooks/workbench-context-lifecycle";
+import {
+  createWorkbenchContextRequestLifecycle,
+  resolveTemplateDefaultViewChange,
+} from "../../src/hooks/workbench-context-lifecycle";
 import type { WorkbenchContext } from "../../src/modules/workbench/workbench-types";
+import type { DataSummary } from "../../src/modules/domain/analysis-types";
 import {
   ReportClientError,
   requestWeeklyReport,
@@ -43,6 +55,19 @@ test("client context normalizes templates without widening authorization", () =>
       canAccessAdmin: false,
     }
   );
+});
+
+test("client context accepts the documented management presentation template", () => {
+  const context = normalizeWorkbenchContext({
+    templateId: "management",
+    availableStoreIds: ["S001"],
+    availableMetricCodes: ["achievement_rate"],
+    availableIntents: ["achievement_rate"],
+    canAccessAdmin: true,
+  });
+
+  assert.equal(context.templateId, "management");
+  assert.deepEqual(context.availableStoreIds, ["S001"]);
 });
 
 test("client context rejects missing permission collections", () => {
@@ -112,6 +137,78 @@ test("presentation selectors expose only metric-backed sections", () => {
   assert.equal(getWorkbenchCopy("regional_manager").title, "辖区经营概览");
 });
 
+test("presentation profiles adapt priority without widening permissions", () => {
+  const regional = getWorkbenchPresentationProfile("regional_manager");
+  const executive = getWorkbenchPresentationProfile("default");
+  const management = getWorkbenchPresentationProfile("management");
+  assert.equal(regional.assistantMode, "action_first");
+  assert.equal(executive.assistantMode, "summary_first");
+  assert.equal(regional.defaultView, "overview");
+  assert.equal(management.defaultView, "overview");
+  assert.equal(management.assistantMode, "summary_first");
+  assert.deepEqual(management.defaultExpandedSections, [
+    "summary",
+    "findings",
+    "evidence",
+  ]);
+  assert.deepEqual(
+    getOrderedInsightSections(
+      ["compare"],
+      management
+    ).slice(0, 6),
+    ["totalSales", "achievement", "salesTrend", "refund", "orders", "aov"]
+  );
+  assert.deepEqual(
+    getOrderedInsightSections(["achievement_rate", "refund_rate"], executive),
+    ["totalSales", "achievement", "refund", "salesTrend"]
+  );
+  assert.doesNotMatch(
+    JSON.stringify(getOrderedInsightSections(["achievement_rate"], regional)),
+    /channel|refund/
+  );
+});
+
+test("template defaults initialize once and reset only when the template changes", () => {
+  assert.equal(
+    resolveTemplateDefaultViewChange(null, "management"),
+    "overview"
+  );
+  assert.equal(
+    resolveTemplateDefaultViewChange("management", "management"),
+    null
+  );
+  assert.equal(
+    resolveTemplateDefaultViewChange("regional_manager", "management"),
+    "overview"
+  );
+});
+
+test("formal insight section toggles preserve local state until the template changes", () => {
+  const initial = createExpandedInsightSections(
+    "management",
+    getWorkbenchPresentationProfile("management").defaultExpandedSections
+  );
+  const collapsed = toggleExpandedInsightSection(initial, "evidence");
+
+  assert.equal(collapsed.expanded.has("evidence"), false);
+  assert.equal(
+    syncExpandedInsightSections(
+      collapsed,
+      "management",
+      getWorkbenchPresentationProfile("management").defaultExpandedSections
+    ),
+    collapsed
+  );
+  assert.deepEqual(
+    [...syncExpandedInsightSections(
+      collapsed,
+      "regional_manager",
+      getWorkbenchPresentationProfile("regional_manager").defaultExpandedSections
+    ).expanded],
+    ["summary", "findings", "actions"]
+  );
+});
+
 test("authorization rejects explicit irrelevant intent", () => {
   assert.equal(
     authorizeIntentMetadata(
@@ -174,6 +271,15 @@ test("scope bar keeps the aggregate authorized-store scope selectable", () => {
           opening_date: "2025-01-01",
           area_type: "Commercial",
         },
+        {
+          store_id: "S002",
+          store_name: "Store Two",
+          region: "East",
+          city: "Shanghai",
+          store_type: "Street",
+          opening_date: "2025-02-01",
+          area_type: "Residential",
+        },
       ],
       availableMetricCodes: [],
       selectedStore: "all",
@@ -187,7 +293,13 @@ test("scope bar keeps the aggregate authorized-store scope selectable", () => {
     })
   );
 
+  assert.match(html, /aria-label="经营范围"/);
   assert.match(html, /<option value="all" selected="">/);
+  assert.match(html, /全部授权门店/);
+  assert.match(html, /开始日期/);
+  assert.match(html, /结束日期/);
+  assert.match(html, /<option value="S001">Store One<\/option>/);
+  assert.match(html, /<option value="S002">Store Two<\/option>/);
 });
 
 test("weekly report client sends only the authorized report scope", async (context) => {
@@ -262,6 +374,7 @@ test("insight canvas exposes the renamed tab", () => {
     createElement(InsightCanvas, {
       view: "analysis",
       templateId: "regional_manager",
+      presentationProfile: getWorkbenchPresentationProfile("regional_manager"),
       availableMetricCodes: [],
       dataSummary: null,
       chartOptions: {} as DashboardChartOptions,
@@ -293,6 +406,158 @@ test("insight panel keeps an old snapshot visible while generating", () => {
 
   assert.match(html, /正在更新洞察/);
   assert.match(html, new RegExp(insightDto.headline));
+});
+
+test("decision brief summarizes without duplicating the formal insight", () => {
+  const html = renderToStaticMarkup(createElement(DecisionBrief, {
+    insight: insightDto,
+    generationStatus: "idle",
+    pendingActionIds: [],
+    assistantMode: "action_first",
+    onOpenInsight: () => undefined,
+  }));
+  assert.match(html, new RegExp(insightDto.headline));
+  assert.match(html, /1\/3 项已完成/);
+  assert.match(html, /查看完整洞察/);
+  assert.doesNotMatch(html, /观察次周表现/);
+  assert.doesNotMatch(html, /晚间销售低于对照周期/);
+  assert.doesNotMatch(html, /8月1日销售额低于上周同期/);
+});
+
+test("summary-first changes decision brief order without changing its content", () => {
+  const actionFirst = renderToStaticMarkup(createElement(DecisionBrief, {
+    insight: insightDto,
+    generationStatus: "idle",
+    pendingActionIds: [],
+    assistantMode: "action_first",
+    onOpenInsight: () => undefined,
+  }));
+  const summaryFirst = renderToStaticMarkup(createElement(DecisionBrief, {
+    insight: insightDto,
+    generationStatus: "idle",
+    pendingActionIds: [],
+    assistantMode: "summary_first",
+    onOpenInsight: () => undefined,
+  }));
+
+  assert.ok(actionFirst.indexOf('data-decision-brief-section="actions"') < actionFirst.indexOf('data-decision-brief-section="summary"'));
+  assert.ok(summaryFirst.indexOf('data-decision-brief-section="summary"') < summaryFirst.indexOf('data-decision-brief-section="actions"'));
+  for (const content of [insightDto.headline, "1/3 项已完成", "复核晚间排班", "检查活动执行", "查看完整洞察"]) {
+    assert.match(actionFirst, new RegExp(content));
+    assert.match(summaryFirst, new RegExp(content));
+  }
+});
+
+test("assistant keeps the complete markdown analysis below the decision brief", () => {
+  const completeAnalysis = [
+    "## 整体趋势",
+    "所有门店销售表现已经完成分析。",
+    "## 门店明细",
+    "地铁站店和社区中心店需要关注，上海商场店高于目标。",
+    "## 经营建议",
+    "先复核客流、转化率和排班，再制定改善动作。",
+  ].join("\n");
+  const html = renderToStaticMarkup(createElement(AssistantPanel, {
+    insight: insightDto,
+    insightGenerationStatus: "idle",
+    pendingInsightActionIds: [],
+    assistantMode: "action_first",
+    onOpenInsight: () => undefined,
+    messages: [{ role: "ai", content: completeAnalysis }],
+    inputValue: "",
+    isStreaming: false,
+    status: null,
+    suggestions: [],
+    chatAreaRef: createRef<HTMLDivElement>(),
+    onInputChange: () => undefined,
+    onSendMessage: () => undefined,
+  }));
+
+  assert.match(html, new RegExp(insightDto.headline));
+  assert.ok(html.indexOf(insightDto.headline) < html.indexOf("整体趋势"));
+  assert.match(html, /所有门店销售表现已经完成分析。/);
+  assert.match(html, /地铁站店和社区中心店需要关注，上海商场店高于目标。/);
+  assert.match(html, /先复核客流、转化率和排班，再制定改善动作。/);
+});
+
+test("assistant preserves multi-message order and complete markdown after insight updates", () => {
+  const html = renderToStaticMarkup(createElement(AssistantPanel, {
+    insight: insightDto,
+    insightGenerationStatus: "idle",
+    pendingInsightActionIds: [],
+    assistantMode: "summary_first",
+    onOpenInsight: () => undefined,
+    messages: [
+      { role: "user", content: "分析全部门店" },
+      { role: "system", content: "已应用授权范围" },
+      { role: "ai", content: "## 整体趋势\n销售分析完整正文。\n\n- 地铁站店需要关注\n- 商场店高于目标" },
+      { role: "user", content: "继续给出行动" },
+      { role: "ai", content: "## 行动建议\n1. 复核客流\n2. 调整排班\n3. 验证销售额" },
+    ],
+    inputValue: "",
+    isStreaming: false,
+    status: null,
+    suggestions: [],
+    chatAreaRef: createRef<HTMLDivElement>(),
+    onInputChange: () => undefined,
+    onSendMessage: () => undefined,
+  }));
+
+  const orderedContent = [
+    "分析全部门店",
+    "已应用授权范围",
+    "整体趋势",
+    "销售分析完整正文。",
+    "地铁站店需要关注",
+    "商场店高于目标",
+    "继续给出行动",
+    "行动建议",
+    "复核客流",
+    "调整排班",
+    "验证销售额",
+  ];
+  let cursor = -1;
+  for (const content of orderedContent) {
+    const next = html.indexOf(content);
+    assert.ok(next > cursor, `${content} should remain in message order`);
+    cursor = next;
+  }
+  assert.match(html, /<h2[^>]*>整体趋势<\/h2>/);
+  assert.match(html, /<li[^>]*>地铁站店需要关注<\/li>/);
+  assert.match(html, /<h2[^>]*>行动建议<\/h2>/);
+});
+
+test("overview separates authorized KPIs from chart reading surfaces", () => {
+  const dataSummary: DataSummary = {
+    dateRange: { start: "2026-08-01", end: "2026-08-07" },
+    stores: ["S001"],
+    salesSummary: {
+      totalSales: 120000,
+      totalOrders: 1200,
+      totalTarget: 100000,
+      achievementRate: "120.0%",
+      avgOrderValue: 100,
+    },
+    channelBreakdown: {},
+    categoryBreakdown: {},
+    daypartBreakdown: {},
+    refundSummary: { totalRefund: 0, totalCancelled: 0 },
+    managerFeedback: [],
+  };
+  const html = renderToStaticMarkup(createElement(OverviewPanel, {
+    profile: getWorkbenchPresentationProfile("regional_manager"),
+    availableMetricCodes: ["compare"],
+    dataSummary,
+    chartOptions: {} as DashboardChartOptions,
+  }));
+
+  assert.match(html, /data-overview-section="kpis"/);
+  assert.match(html, /data-overview-section="charts"/);
+  assert.match(html, /关键指标/);
+  assert.match(html, /趋势与结构/);
+  assert.ok(html.indexOf("关键指标") < html.indexOf("趋势与结构"));
+  assert.match(html, /¥12.0万/);
+  assert.match(html, /120.0%/);
 });
 
 test("scope mismatch offers an explicit restore command", () => {
@@ -338,6 +603,47 @@ test("insight panel renders verification items and actionable priority states", 
   assert.match(html, /data-state="checked"/);
   assert.match(html, /负责角色：运营/);
   assert.match(html, /验证指标：销售额/);
+});
+
+test("insight renders one formal article with stable reading sections", () => {
+  const html = renderInsightPanel({ error: "internal database detail" });
+
+  assert.match(html, /<article[^>]*aria-label="洞察与行动"/);
+  assert.equal((html.match(/<article/g) ?? []).length, 1);
+  for (const section of ["core", "findings", "evidence", "verification", "actions"]) {
+    assert.match(html, new RegExp(`data-insight-section="${section}"`));
+  }
+  for (const heading of ["核心判断", "关键发现", "支持证据", "待核查项", "行动清单"]) {
+    assert.match(html, new RegExp(heading));
+  }
+  assert.doesNotMatch(html, /internal database detail/);
+  assert.match(html, /aria-label="查看证据：晚间销售承压"/);
+});
+
+test("formal insight exposes accessible controls initialized from the profile", () => {
+  const html = renderInsightPanel({
+    templateId: "management",
+    defaultExpandedSections: ["summary", "findings", "evidence"],
+  });
+
+  for (const label of ["核心判断", "关键发现", "支持证据", "行动清单"]) {
+    assert.match(html, new RegExp(`aria-label="切换${label}"`));
+    assert.match(html, new RegExp(`<h3[^>]*><button[^>]*aria-label="切换${label}"`));
+  }
+  assert.match(html, /aria-label="切换核心判断"[^>]*aria-expanded="true"/);
+  assert.match(html, /aria-label="切换行动清单"[^>]*aria-expanded="false"/);
+  assert.match(html, /data-insight-section="verification"/);
+  assert.doesNotMatch(html, /负责角色：运营/);
+});
+
+test("formal insight keeps the verification section when no checks are pending", () => {
+  const html = renderInsightPanel({
+    insight: { ...insightDto, verificationItems: [] },
+  });
+
+  assert.match(html, /data-insight-section="verification"/);
+  assert.match(html, /待核查项/);
+  assert.match(html, /当前暂无待核查项/);
 });
 
 test("action save failure keeps the snapshot visible with a light warning", () => {
@@ -468,6 +774,8 @@ function renderInsightPanel(
       error: null,
       generationStatus: "idle",
       pendingActionIds: [],
+      templateId: "management",
+      defaultExpandedSections: ["summary", "findings", "evidence", "actions"],
       activeScope: {
         storeIds: ["S001"],
         startDate: "2026-08-01",

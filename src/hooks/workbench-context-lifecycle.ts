@@ -1,3 +1,9 @@
+import {
+  getWorkbenchPresentationProfile,
+  type InsightView,
+} from "@/modules/workbench/workbench-presentation";
+import type { WorkbenchTemplateId } from "@/modules/workbench/workbench-types";
+
 export interface WorkbenchContextRequestLifecycle {
   deactivate(): void;
   runIfActive(effect: () => void): boolean;
@@ -16,4 +22,13 @@ export function createWorkbenchContextRequestLifecycle(): WorkbenchContextReques
       return true;
     },
   };
+}
+
+export function resolveTemplateDefaultViewChange(
+  previousTemplateId: WorkbenchTemplateId | null,
+  nextTemplateId: WorkbenchTemplateId
+): InsightView | null {
+  return previousTemplateId === nextTemplateId
+    ? null
+    : getWorkbenchPresentationProfile(nextTemplateId).defaultView;
 }

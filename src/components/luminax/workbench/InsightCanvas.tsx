@@ -6,6 +6,7 @@ import { ReportView } from "@/components/luminax/workbench/ReportView";
 import type { DataSummary } from "@/modules/domain/analysis-types";
 import type {
   InsightView,
+  WorkbenchPresentationProfile,
 } from "@/modules/workbench/workbench-presentation";
 import { getWorkbenchCopy } from "@/modules/workbench/workbench-presentation";
 import type { WorkbenchTemplateId } from "@/modules/workbench/workbench-types";
@@ -16,6 +17,7 @@ import { cn } from "@/lib/utils";
 interface InsightCanvasProps {
   view: InsightView;
   templateId: WorkbenchTemplateId;
+  presentationProfile: WorkbenchPresentationProfile;
   availableMetricCodes: string[];
   dataSummary: DataSummary | null;
   chartOptions: DashboardChartOptions;
@@ -42,6 +44,7 @@ const VIEW_TABS: ReadonlyArray<{ view: InsightView; label: string }> = [
 export function InsightCanvas({
   view,
   templateId,
+  presentationProfile,
   availableMetricCodes,
   dataSummary,
   chartOptions,
@@ -98,6 +101,7 @@ export function InsightCanvas({
 
       {view === "overview" && (
         <OverviewPanel
+          profile={presentationProfile}
           availableMetricCodes={availableMetricCodes}
           dataSummary={dataSummary}
           chartOptions={chartOptions}
@@ -110,6 +114,8 @@ export function InsightCanvas({
           error={insightError}
           generationStatus={insightGenerationStatus}
           pendingActionIds={pendingInsightActionIds}
+          templateId={templateId}
+          defaultExpandedSections={presentationProfile.defaultExpandedSections}
           activeScope={activeInsightScope}
           suggestions={suggestions}
           onAskQuestion={onAskQuestion}

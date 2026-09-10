@@ -5,7 +5,15 @@ import { AlertTriangle, ArrowRightLeft, Clock3, Database, Store } from "lucide-r
 import { InsightActionChecklist } from "@/components/luminax/workbench/InsightActionChecklist";
 import { InsightEvidenceSection } from "@/components/luminax/workbench/InsightEvidenceSection";
 import { InsightFindingList } from "@/components/luminax/workbench/InsightFindingList";
-import { isInsightScopeActive } from "@/modules/workbench/workbench-presentation";
+import { InsightSectionToggle } from "@/components/luminax/workbench/InsightSectionToggle";
+import {
+  createExpandedInsightSections,
+  isInsightScopeActive,
+  syncExpandedInsightSections,
+  toggleExpandedInsightSection,
+  type FormalInsightSectionId,
+} from "@/modules/workbench/workbench-presentation";
+import type { WorkbenchTemplateId } from "@/modules/workbench/workbench-types";
 import type { InsightFinding, InsightScope, InsightSnapshotDto } from "@/modules/insights/insight-types";
 
 interface ActiveInsightScope {
@@ -20,6 +28,8 @@ export interface InsightActionPanelProps {
   error: string | null;
   generationStatus: "idle" | "generating" | "failed";
   pendingActionIds: string[];
+  templateId: WorkbenchTemplateId;
+  defaultExpandedSections: readonly FormalInsightSectionId[];
   activeScope: ActiveInsightScope;
   suggestions: string[];
   onAskQuestion(question: string): void;
@@ -33,12 +43,17 @@ export function InsightActionPanel({
   error,
   generationStatus,
   pendingActionIds,
+  templateId,
+  defaultExpandedSections,
   activeScope,
   suggestions,
   onAskQuestion,
   onApplyScope,
   onToggleAction,
 }: InsightActionPanelProps) {
+  const [expandedSections, setExpandedSections] = useState(() =>
+    createExpandedInsightSections(templateId, defaultExpandedSections)
+  );
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [highlightedEvidenceIds, setHighlightedEvidenceIds] = useState<Set<string>>(new Set());
   const evidenceRefs = useRef(new Map<string, HTMLElement>());
@@ -46,6 +61,22 @@ export function InsightActionPanel({
 
   useEffect(() => () => {
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
+  }, []);
+
+  useEffect(() => {
+    setExpandedSections((current) =>
+      syncExpandedInsightSections(
+        current,
+        templateId,
+        defaultExpandedSections
+      )
+    );
+  }, [defaultExpandedSections, templateId]);
+
+  const toggleSection = useCallback((sectionId: FormalInsightSectionId) => {
+    setExpandedSections((current) =>
+      toggleExpandedInsightSection(current, sectionId)
+    );
   }, []);
 
   const registerEvidenceRef = useCallback((id: string, element: HTMLElement | null) => {
@@ -56,10 +87,17 @@ export function InsightActionPanel({
   const selectFinding = useCallback((finding: InsightFinding) => {
     setSelectedFindingId(finding.id);
     setHighlightedEvidenceIds(new Set(finding.evidenceIds));
-    evidenceRefs.current.get(finding.evidenceIds[0])?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-    });
+    setExpandedSections((current) =>
+      current.expanded.has("evidence")
+        ? current
+        : toggleExpandedInsightSection(current, "evidence")
+    );
+    setTimeout(() => {
+      evidenceRefs.current.get(finding.evidenceIds[0])?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }, 0);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightedEvidenceIds(new Set()), 1800);
   }, []);
@@ -87,7 +125,10 @@ export function InsightActionPanel({
   const scopeMatches = isInsightScopeActive(activeScope, insight.scope);
 
   return (
-    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+    <article
+      aria-label="洞察与行动"
+      className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-white"
+    >
       {generationStatus === "generating" && (
         <StatusStrip>正在更新洞察，当前内容仍可查看</StatusStrip>
       )}
@@ -113,7 +154,7 @@ export function InsightActionPanel({
         </div>
       )}
 
-      <section className="border-b border-[#dedfe2] bg-white px-4 py-4 sm:px-5">
+      <header className="border-b border-border px-4 py-4 sm:px-6">
         <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-[#666a73]">
           <span className="inline-flex items-center gap-1.5"><Database className="size-3.5" />来源：{insight.sourceQuestion}</span>
           <span className="inline-flex items-center gap-1.5"><Store className="size-3.5" />门店：{insight.scope.storeIds.join("、")}</span>
@@ -121,45 +162,68 @@ export function InsightActionPanel({
           {insight.scope.comparisonLabel && <span>对比：{insight.scope.comparisonLabel}</span>}
           <span>更新：{formatUpdatedAt(insight.updatedAt)}</span>
         </div>
-      </section>
+      </header>
 
-      <section className="border-b border-[#dedfe2] bg-[#fffbea] px-4 py-5 sm:px-5">
-        <p className="text-xs font-medium text-[#716200]">核心判断</p>
-        <h3 className="mt-2 break-words text-lg font-semibold leading-7 text-[#17181a]">
-          {insight.headline}
-        </h3>
+      <section
+        data-insight-section="core"
+        className="border-b border-border bg-[color-mix(in_srgb,var(--luminax-yellow)_10%,white)] px-4 py-6 sm:px-6"
+      >
+        <InsightSectionToggle
+          label="核心判断"
+          expanded={expandedSections.expanded.has("summary")}
+          controls="insight-summary-content"
+          onToggle={() => toggleSection("summary")}
+        />
+        {expandedSections.expanded.has("summary") && (
+          <h3 id="insight-summary-content" className="mt-2 break-words text-lg font-semibold leading-7 text-foreground">
+            {insight.headline}
+          </h3>
+        )}
       </section>
 
       <InsightFindingList
         findings={insight.findings}
+        expanded={expandedSections.expanded.has("findings")}
         selectedFindingId={selectedFindingId}
         onSelectFinding={selectFinding}
+        onToggle={() => toggleSection("findings")}
       />
       <InsightEvidenceSection
         evidence={insight.evidence}
+        expanded={expandedSections.expanded.has("evidence")}
         highlightedEvidenceIds={highlightedEvidenceIds}
         registerEvidenceRef={registerEvidenceRef}
+        onToggle={() => toggleSection("evidence")}
       />
-      {insight.verificationItems.length > 0 && (
-        <section className="border-b border-[#dedfe2] bg-white px-4 py-5 sm:px-5">
-          <h3 className="text-sm font-semibold text-[#17181a]">待核查项</h3>
+      <section
+        data-insight-section="verification"
+        className="border-b border-border px-4 py-6 sm:px-6"
+      >
+        <h3 className="text-sm font-semibold text-[#17181a]">待核查项</h3>
+        {insight.verificationItems.length > 0 ? (
           <div className="mt-3 divide-y divide-[#e9eaec] border-y border-[#e9eaec]">
             {insight.verificationItems.map((item) => (
-              <article key={item.id} className="grid gap-3 py-4 text-sm sm:grid-cols-3">
+              <div key={item.id} className="grid gap-3 py-4 text-sm sm:grid-cols-3">
                 <VerificationValue label="已观察事实" value={item.observedFact} />
                 <VerificationValue label="可能原因" value={item.hypothesis} />
                 <VerificationValue label="需核查" value={item.requiredCheck} />
-              </article>
+              </div>
             ))}
           </div>
-        </section>
-      )}
+        ) : (
+          <p className="mt-3 border-y border-border py-4 text-sm text-muted-foreground">
+            当前暂无待核查项
+          </p>
+        )}
+      </section>
       <InsightActionChecklist
         actions={insight.actions}
+        expanded={expandedSections.expanded.has("actions")}
         pendingActionIds={pendingActionIds}
         onToggleAction={onToggleAction}
+        onToggle={() => toggleSection("actions")}
       />
-    </div>
+    </article>
   );
 }
 
@@ -233,7 +297,7 @@ function InsightAccessError({ message }: { message: string }) {
 function VerificationValue({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-xs font-medium text-[#777b84]">{label}</p>
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <p className="mt-1 break-words leading-6 text-[#303238]">{value}</p>
     </div>
   );

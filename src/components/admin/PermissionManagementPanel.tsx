@@ -331,43 +331,51 @@ export function PermissionManagementPanel() {
   }
 
   return (
-    <section className="p-4 md:p-6 lg:p-8">
+    <section className="p-4 md:p-6 xl:p-8" aria-busy={Boolean(busyAction)}>
       <div className="mx-auto max-w-[1440px]">
-        <div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <h1 className="text-xl font-semibold text-zinc-950">权限管理</h1>
-            <p className="mt-1 text-sm text-zinc-500">用户级数据访问策略</p>
+            <p className="mb-1 text-xs font-semibold text-[var(--muted-foreground)]">访问治理</p>
+            <h1 className="text-xl font-semibold text-[var(--luminax-ink)]">权限管理</h1>
+            <p className="mt-1 text-sm text-[var(--muted-foreground)]">用户级数据访问策略</p>
           </div>
           <Button
             onClick={openCreate}
-            className="bg-[#18181b] text-white hover:bg-zinc-800"
+            className="h-11 bg-[var(--luminax-ink)] px-4 text-white hover:bg-black"
           >
             <Plus className="size-4" />
             新增用户
           </Button>
         </div>
 
-        <div className="mb-5 grid grid-cols-2 border border-zinc-200 bg-white sm:grid-cols-4">
+        <div className="mb-5 grid grid-cols-2 overflow-hidden rounded-md border border-[var(--border)] bg-white sm:grid-cols-4">
           <SummaryItem label="全部用户" value={snapshot.users.length} />
           <SummaryItem label="启用中" value={activeUsers} tone="success" />
           <SummaryItem label="受限用户" value={restrictedUsers} />
           <SummaryItem label="数据表" value={snapshot.catalog.length} />
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-          <div className="flex flex-col gap-3 border-b border-zinc-200 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative w-full sm:max-w-sm">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="搜索用户名、姓名或角色"
-                className="pl-9"
-              />
+        <div className="overflow-hidden rounded-md border border-[var(--border)] bg-white">
+          <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="w-full space-y-1.5 sm:max-w-sm">
+              <Label htmlFor="permission-search" className="text-xs text-[var(--muted-foreground)]">
+                搜索用户
+              </Label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+                <Input
+                  id="permission-search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="用户名、姓名或角色"
+                  className="h-11 pl-9"
+                />
+              </div>
             </div>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
+                  className="size-11"
                   variant="outline"
                   size="icon"
                   onClick={() => void loadPermissions()}
@@ -439,7 +447,7 @@ export function PermissionManagementPanel() {
                                 </Badge>
                               )}
                             </div>
-                            <div className="truncate font-mono text-xs text-zinc-400">
+                            <div className="truncate font-mono text-xs text-muted-foreground">
                               {user.username}
                             </div>
                           </div>
@@ -454,14 +462,16 @@ export function PermissionManagementPanel() {
                       <TableCell>{user.system ? "全部" : columnCount}</TableCell>
                       <TableCell>{user.system ? "全部" : `${storeCount} 家`}</TableCell>
                       <TableCell>
-                        <Switch
-                          checked={user.status === "active"}
-                          disabled={user.system || busyAction === `status:${user.id}`}
-                          onCheckedChange={(checked) =>
-                            void toggleStatus(user, checked)
-                          }
-                          aria-label={`${user.displayName}启用状态`}
-                        />
+                        <label className="inline-flex min-h-11 min-w-11 items-center justify-center md:min-h-0 md:min-w-0">
+                          <Switch
+                            checked={user.status === "active"}
+                            disabled={user.system || busyAction === `status:${user.id}`}
+                            onCheckedChange={(checked) =>
+                              void toggleStatus(user, checked)
+                            }
+                            aria-label={`${user.displayName}启用状态`}
+                          />
+                        </label>
                       </TableCell>
                       <TableCell className="pr-4 text-right">
                         {!user.system && (
@@ -504,7 +514,7 @@ export function PermissionManagementPanel() {
           </Table>
         </div>
 
-        <div className="mt-5 overflow-hidden rounded-lg border border-zinc-200 bg-white">
+        <div className="mt-5 overflow-hidden rounded-md border border-[var(--border)] bg-white">
           <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-3">
             <ShieldCheck className="size-4 text-zinc-600" />
             <h2 className="text-sm font-semibold text-zinc-900">权限模拟器</h2>
@@ -567,6 +577,7 @@ export function PermissionManagementPanel() {
               </LabeledSelect>
             </Select>
             <Button
+              className="h-11"
               variant="outline"
               onClick={() => void evaluatePermission()}
               disabled={busyAction === "evaluate" || !simulation.userId}
@@ -599,7 +610,7 @@ export function PermissionManagementPanel() {
       </div>
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden sm:max-w-6xl">
+        <DialogContent data-admin-editor="permission" className="flex max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden sm:max-w-6xl">
           <DialogHeader>
             <DialogTitle>{form.id ? "编辑用户权限" : "新增用户"}</DialogTitle>
             <DialogDescription>配置数据表、字段与门店数据范围</DialogDescription>
@@ -674,7 +685,7 @@ export function PermissionManagementPanel() {
                 </Select>
               </div>
               <div className="flex items-center justify-between border-y border-zinc-200 py-3">
-                <Label htmlFor="permission-active">启用用户</Label>
+                <Label className="flex min-h-11 items-center md:min-h-0" htmlFor="permission-active">启用用户</Label>
                 <Switch
                   id="permission-active"
                   checked={form.status === "active"}
@@ -709,13 +720,15 @@ export function PermissionManagementPanel() {
                               : "text-zinc-600 hover:bg-white/70"
                           }`}
                         >
-                          <Checkbox
-                            checked={granted}
-                            onCheckedChange={(checked) =>
-                              toggleTable(table.name, Boolean(checked))
-                            }
-                            aria-label={`授权 ${table.label}`}
-                          />
+                          <label className="grid min-h-11 min-w-11 place-items-center md:min-h-0 md:min-w-0">
+                            <Checkbox
+                              checked={granted}
+                              onCheckedChange={(checked) =>
+                                toggleTable(table.name, Boolean(checked))
+                              }
+                              aria-label={`授权 ${table.label}`}
+                            />
+                          </label>
                           <button
                             type="button"
                             className="min-w-0 flex-1 truncate text-left"
@@ -738,7 +751,7 @@ export function PermissionManagementPanel() {
                             <h3 className="truncate text-sm font-semibold text-zinc-900">
                               {selectedCatalogTable.label}
                             </h3>
-                            <p className="truncate font-mono text-xs text-zinc-400">
+                            <p className="truncate font-mono text-xs text-muted-foreground">
                               {selectedCatalogTable.name}
                             </p>
                           </div>
@@ -820,13 +833,13 @@ export function PermissionManagementPanel() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditorOpen(false)}>
+            <Button className="h-11" variant="outline" onClick={() => setEditorOpen(false)}>
               取消
             </Button>
             <Button
               onClick={() => void saveUser()}
               disabled={busyAction === "save"}
-              className="bg-[#18181b] text-white hover:bg-zinc-800"
+              className="h-11 bg-[var(--luminax-ink)] text-white hover:bg-black"
             >
               {busyAction === "save" && <Loader2 className="size-4 animate-spin" />}
               保存权限
@@ -925,7 +938,7 @@ function PolicySection({
         <div className="flex items-center gap-2 text-sm font-medium text-zinc-800">
           <Icon className="size-4 text-zinc-500" />
           {title}
-          <span className="text-xs font-normal text-zinc-400">
+          <span className="text-xs font-normal text-muted-foreground">
             {selected}/{total}
           </span>
         </div>
@@ -948,7 +961,7 @@ function PolicyCheckbox({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex min-h-9 min-w-0 items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50">
+    <label className="flex min-h-11 min-w-0 items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-700 hover:bg-zinc-50 md:min-h-9">
       <Checkbox
         checked={checked}
         onCheckedChange={(value) => onCheckedChange(Boolean(value))}

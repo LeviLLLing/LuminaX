@@ -28,7 +28,7 @@ test("workbench template resolves roles with a safe deterministic fallback", () 
     "attribution",
     "report",
   ]);
-  assert.equal(superAdmin.id, "default");
+  assert.equal(superAdmin.id, "management");
   assert.equal(analyst.id, "default");
   assert.equal(unknown.id, "default");
 
@@ -78,6 +78,7 @@ test("workbench context projects metric and store permissions without leaking po
 
   const admin = createSystemPermissionUser();
   const adminContext = await application.getContext(toAuthenticated(admin));
+  assert.equal(adminContext.templateId, "management");
   assert.deepEqual(adminContext.availableStoreIds, ["S001", "S002"]);
   assert.deepEqual(adminContext.availableMetricCodes, [
     ...SYSTEM_METRIC_DEFINITIONS.map((metric) => metric.code),

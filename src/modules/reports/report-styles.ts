@@ -11,7 +11,7 @@ body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0; paddin
 .kpi-card { background: #fff; border-radius: 8px; padding: 18px; border: 1px solid #e8e8e8; border-top: 4px solid #FFE600; box-shadow: 0 2px 8px rgba(0,0,0,0.04); transition: transform 0.2s; }
 .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
 .kpi-value { font-size: 24px; font-weight: 700; color: #1a1a1a; }
-.kpi-label { font-size: 11px; color: #888; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.kpi-label { font-size: 11px; color: #666; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
 .summary-box { background: #fffbe6; border-left: 4px solid #FFE600; padding: 14px 18px; margin: 12px 0; border-radius: 0 6px 6px 0; font-size: 13px; line-height: 1.8; }
 table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; background: #fff; }
 th { background: #1a1a1a; color: #FFE600; padding: 10px 12px; text-align: left; font-weight: 600; }
@@ -19,9 +19,9 @@ td { padding: 8px 12px; border-bottom: 1px solid #e8e8e8; }
 tr:nth-child(even) { background: #fafafa; }
 .chart-container { width: 100%; height: 320px; background: #fff; border-radius: 6px; margin: 12px 0; }
 .chart-row { display: flex; gap: 20px; flex-wrap: wrap; }
-.chart-col { flex: 1; min-width: 380px; }
+.chart-col { flex: 1 1 380px; min-width: min(380px, 100%); }
 .chart-title { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 6px; padding-left: 4px; }
-.footer { margin-top: 24px; padding-top: 14px; border-top: 1px solid #e0e0e0; font-size: 10px; color: #999; text-align: center; }
+.footer { margin-top: 24px; padding-top: 14px; border-top: 1px solid #e0e0e0; font-size: 10px; color: #666; text-align: center; }
 .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-left: 6px; }
 .tag-up { background: #e8f5e9; color: #2e7d32; }
 .tag-down { background: #ffebee; color: #c62828; }

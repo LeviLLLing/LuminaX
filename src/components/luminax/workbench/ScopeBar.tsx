@@ -74,16 +74,20 @@ export function ScopeBar({
   }
 
   return (
-    <div className="flex shrink-0 flex-wrap items-end gap-x-3 gap-y-2 border-b border-[#dedfe2] bg-white px-3 py-2 sm:px-4">
-      <label className="flex min-w-0 flex-1 basis-44 flex-col gap-1 text-xs font-medium text-[#4b4e55]">
+    <div
+      role="group"
+      aria-label="经营范围"
+      className="flex shrink-0 flex-wrap items-end gap-x-3 gap-y-2 border-b border-border bg-white px-3 py-2 sm:px-4"
+    >
+      <label className="flex min-w-0 flex-1 basis-44 flex-col gap-1 text-xs font-medium text-muted-foreground">
         门店
         <span className="relative">
-          <Store className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-[#4b4e55]" />
+          <Store className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
           <select
             value={selectedStoreValue}
             onChange={(event) => selectPrimaryStore(event.target.value)}
             disabled={stores.length === 0}
-            className="h-9 w-full min-w-0 appearance-none rounded-md border border-[#737780] bg-white py-1 pr-8 pl-8 text-sm text-black outline-none transition-colors hover:border-black focus:border-black focus:ring-2 focus:ring-black/20 disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[#737780]"
+            className="h-9 w-full min-w-0 appearance-none rounded-md border border-input bg-white py-1 pr-8 pl-8 text-sm text-foreground outline-none transition-colors hover:border-foreground focus:border-foreground focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:bg-[var(--luminax-canvas)] disabled:text-muted-foreground"
           >
             {stores.length === 0 ? (
               <option value="" disabled>
@@ -98,27 +102,27 @@ export function ScopeBar({
               </option>
             ))}
           </select>
-          <ChevronDown className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-[#4b4e55]" />
+          <ChevronDown className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground" />
         </span>
       </label>
 
-      <label className="flex min-w-[8.5rem] flex-1 basis-36 flex-col gap-1 text-xs font-medium text-[#4b4e55]">
+      <label className="flex min-w-[8.5rem] flex-1 basis-36 flex-col gap-1 text-xs font-medium text-muted-foreground">
         开始日期
         <input
           type="date"
           value={startDate}
           onChange={(event) => onStartDateChange(event.target.value)}
-          className="h-9 w-full rounded-md border border-[#737780] bg-white px-2 text-sm text-black outline-none transition-colors hover:border-black focus:border-black focus:ring-2 focus:ring-black/20"
+          className="h-9 w-full rounded-md border border-input bg-white px-2 text-sm text-foreground outline-none transition-colors hover:border-foreground focus:border-foreground focus:ring-2 focus:ring-ring/20"
         />
       </label>
 
-      <label className="flex min-w-[8.5rem] flex-1 basis-36 flex-col gap-1 text-xs font-medium text-[#4b4e55]">
+      <label className="flex min-w-[8.5rem] flex-1 basis-36 flex-col gap-1 text-xs font-medium text-muted-foreground">
         结束日期
         <input
           type="date"
           value={endDate}
           onChange={(event) => onEndDateChange(event.target.value)}
-          className="h-9 w-full rounded-md border border-[#737780] bg-white px-2 text-sm text-black outline-none transition-colors hover:border-black focus:border-black focus:ring-2 focus:ring-black/20"
+          className="h-9 w-full rounded-md border border-input bg-white px-2 text-sm text-foreground outline-none transition-colors hover:border-foreground focus:border-foreground focus:ring-2 focus:ring-ring/20"
         />
       </label>
 
@@ -127,7 +131,7 @@ export function ScopeBar({
           <button
             type="button"
             disabled={comparisonDisabled}
-            className="flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md border border-[#737780] bg-white px-3 text-sm font-medium text-black transition-colors hover:border-black hover:bg-[#f5f6f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[#737780]"
+            className="flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md border border-input bg-white px-3 text-sm font-medium text-foreground transition-colors hover:border-foreground hover:bg-[var(--luminax-canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-[var(--luminax-canvas)] disabled:text-muted-foreground"
           >
             <StoreIcon className="size-4 shrink-0" />
             <span className="truncate">
@@ -136,7 +140,7 @@ export function ScopeBar({
             <ChevronDown className="size-4 shrink-0" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64 rounded-md border-[#737780]">
+        <DropdownMenuContent align="end" className="w-64 rounded-md border-border">
           <DropdownMenuLabel>选择对比门店</DropdownMenuLabel>
           <DropdownMenuSeparator />
           {stores.map((store) => (
@@ -157,14 +161,14 @@ export function ScopeBar({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md border border-[#737780] bg-white px-3 text-sm font-medium text-black transition-colors hover:border-black hover:bg-[#f5f6f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
+            className="flex h-9 min-w-0 max-w-full items-center gap-2 rounded-md border border-input bg-white px-3 text-sm font-medium text-foreground transition-colors hover:border-foreground hover:bg-[var(--luminax-canvas)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <BarChart3 className="size-4 shrink-0" />
             <span className="truncate">可用指标</span>
             <ChevronDown className="size-4 shrink-0" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56 rounded-md border-[#737780]">
+        <DropdownMenuContent align="end" className="w-56 rounded-md border-border">
           <DropdownMenuLabel>可用指标</DropdownMenuLabel>
           <DropdownMenuSeparator />
           {availableMetricCodes.length > 0 ? (

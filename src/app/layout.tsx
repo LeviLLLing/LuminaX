@@ -4,8 +4,8 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: 'LuminaX-灵犀经营智能引擎',
-    template: '%s | 销售归因分析',
+    default: 'LuminaX 经营决策工作台',
+    template: '%s | LuminaX',
   },
   description:
     'LuminaX-灵犀经营智能引擎 - 自然语言驱动的销售数据看板与智能归因分析',
@@ -52,7 +52,7 @@ export default function RootLayout({
 
   return (
     <html lang="zh-CN">
-      <body className={`antialiased`}>
+      <body className="min-h-[100dvh] bg-background text-foreground antialiased">
         {isDev && <Inspector />}
         {children}
       </body>

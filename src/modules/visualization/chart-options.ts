@@ -1,8 +1,6 @@
 import {
-  BRAND_YELLOW,
   CATEGORY_LABELS,
   CHANNEL_LABELS,
-  CHART_PALETTE,
   DAYPART_LABELS,
   STORE_DISPLAY_INFO,
 } from "@/modules/domain/constants";
@@ -14,8 +12,10 @@ import {
 } from "@/modules/visualization/chart-series-builders";
 import {
   createAxisGrid,
+  createChartTextStyle,
   EMPTY_DASHBOARD_CHART_OPTIONS,
   formatCompactNumber,
+  LUMINAX_CHART_COLORS,
   type DashboardChartOptions,
 } from "@/modules/visualization/chart-theme";
 
@@ -55,19 +55,20 @@ function buildSalesTrendOption(
         : [selectedStore];
 
   const baseOption = {
+    textStyle: createChartTextStyle(),
     tooltip: { trigger: "axis" as const },
-    legend: { bottom: 0, textStyle: { fontSize: 11 } },
+    legend: { bottom: 0, textStyle: createChartTextStyle() },
     grid: createAxisGrid(),
     xAxis: {
       type: "category" as const,
       data: dates.map((date) => date.slice(5)),
-      axisLabel: { fontSize: 11 },
+      axisLabel: createChartTextStyle(),
     },
     yAxis: {
       type: "value" as const,
       name: "元",
       axisLabel: {
-        fontSize: 11,
+        ...createChartTextStyle(),
         formatter: (value: number) =>
           value >= 10000 ? `${(value / 10000).toFixed(0)}万` : String(value),
       },
@@ -97,27 +98,21 @@ function buildSalesTrendOption(
           type: "line",
           data: salesData,
           smooth: true,
-          itemStyle: { color: BRAND_YELLOW },
+          itemStyle: { color: LUMINAX_CHART_COLORS.primary },
           areaStyle: {
-            color: {
-              type: "linear" as const,
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: "rgba(255,230,0,0.4)" },
-                { offset: 1, color: "rgba(255,230,0,0.05)" },
-              ],
-            },
+            color: LUMINAX_CHART_COLORS.primary,
+            opacity: 0.12,
           },
         },
         {
           name: "销售目标",
           type: "line",
           data: targetData,
-          lineStyle: { type: "dashed" as const, color: "#c62828" },
-          itemStyle: { color: "#c62828" },
+          lineStyle: {
+            type: "dashed" as const,
+            color: LUMINAX_CHART_COLORS.risk,
+          },
+          itemStyle: { color: LUMINAX_CHART_COLORS.risk },
         },
       ],
     };
@@ -135,7 +130,12 @@ function buildSalesTrendOption(
         return item?.actual_sales || 0;
       }),
       smooth: true,
-      itemStyle: { color: CHART_PALETTE[index % CHART_PALETTE.length] },
+      itemStyle: {
+        color:
+          LUMINAX_CHART_COLORS.series[
+            index % LUMINAX_CHART_COLORS.series.length
+          ],
+      },
     })),
   };
 }
@@ -191,8 +191,9 @@ function buildMixOption<TItem extends MixRow>({
   if (compareStores.length > 1) {
     const dimensions = uniqueSorted(rows.map(getDimension));
     return {
+      textStyle: createChartTextStyle(),
       tooltip: { trigger: "axis" as const },
-      legend: { bottom: 0, textStyle: { fontSize: 11 } },
+      legend: { bottom: 0, textStyle: createChartTextStyle() },
       grid: createAxisGrid(),
       xAxis: {
         type: "category" as const,
@@ -211,7 +212,12 @@ function buildMixOption<TItem extends MixRow>({
             (item) => item.sales_amount
           )
         ),
-        itemStyle: { color: CHART_PALETTE[index % CHART_PALETTE.length] },
+        itemStyle: {
+          color:
+            LUMINAX_CHART_COLORS.series[
+              index % LUMINAX_CHART_COLORS.series.length
+            ],
+        },
       })),
     };
   }
@@ -227,12 +233,13 @@ function buildMixOption<TItem extends MixRow>({
   }));
 
   return {
+    textStyle: createChartTextStyle(),
     tooltip: {
       trigger: "item" as const,
       formatter: (params: { name: string; value: number; percent: number }) =>
         `${params.name}: ¥${formatCompactNumber(params.value)} (${params.percent}%)`,
     },
-    legend: { bottom: 0, textStyle: { fontSize: 11 } },
+    legend: { bottom: 0, textStyle: createChartTextStyle() },
     series: [
       {
         type: "pie",
@@ -246,7 +253,7 @@ function buildMixOption<TItem extends MixRow>({
         itemStyle: { borderRadius: 6, borderColor: "#fff", borderWidth: 2 },
       },
     ],
-    color: CHART_PALETTE,
+    color: LUMINAX_CHART_COLORS.series,
   };
 }
 
@@ -266,13 +273,14 @@ function buildRefundOption(chartData: ChartData) {
   );
 
   return {
+    textStyle: createChartTextStyle(),
     tooltip: { trigger: "axis" as const },
-    legend: { bottom: 0, textStyle: { fontSize: 11 } },
+    legend: { bottom: 0, textStyle: createChartTextStyle() },
     grid: createAxisGrid(),
     xAxis: {
       type: "category" as const,
       data: dates.map((date) => date.slice(5)),
-      axisLabel: { fontSize: 11 },
+      axisLabel: createChartTextStyle(),
     },
     yAxis: [
       { type: "value" as const, name: "退款(元)", position: "left" },
@@ -283,7 +291,7 @@ function buildRefundOption(chartData: ChartData) {
         name: "退款金额",
         type: "bar",
         data: refundData,
-        itemStyle: { color: "#c62828" },
+        itemStyle: { color: LUMINAX_CHART_COLORS.risk },
       },
       {
         name: "取消订单",
@@ -291,7 +299,7 @@ function buildRefundOption(chartData: ChartData) {
         yAxisIndex: 1,
         data: cancelData,
         smooth: true,
-        itemStyle: { color: "#f57c00" },
+        itemStyle: { color: LUMINAX_CHART_COLORS.risk },
       },
     ],
   };

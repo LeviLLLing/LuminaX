@@ -9,11 +9,9 @@ LuminaX 是用于门店经营分析、归因洞察和受控指标运营的本地
 - 由系统管理员维护指标登记、用户、角色、数据范围与权限策略。
 - 以 MySQL 作为当前活跃的本地数据设置；`json` 仅作为演示数据回退来源。
 
-## Current UI and Target Contract
+## Current UI Contract
 
-当前 Phase 0 UI 由既有的 `LuminaXApp` 提供，默认显示聊天视图，并按分析意图切换到仪表盘或报告视图。
-
-已批准的统一双核工作台、两种固定角色模板和移动端分段视图是后续阶段的目标设计，当前运行时尚未实现。`DESIGN.md` 是该后续界面的目标设计合同，不是当前 UI 的实现说明。
+当前 UI 是明亮模式 AI 决策协同工作台：桌面端并置经营数据与决策协同区，移动端在“经营数据 / 决策协同”之间切换。系统提供 `regional_manager`（行动优先）、`management`（管理层摘要优先）和 `default`（通用摘要优先）三种展示模板；模板只调整展示顺序、默认视图和洞察区块初始展开状态，不能扩大任何数据权限。`DESIGN.md` 记录当前产品界面合同。
 
 ## Architecture at a Glance
 
@@ -123,6 +121,12 @@ pnpm test
 
 ```bash
 pnpm build
+```
+
+发布前一次性执行静态检查、模块接口测试和生产构建：
+
+```bash
+pnpm run verify
 ```
 
 ## Database Checks

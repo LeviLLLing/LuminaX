@@ -1,6 +1,6 @@
 import type { AnalysisIntent } from "@/modules/domain/analysis-types";
 
-export type WorkbenchTemplateId = "regional_manager" | "default";
+export type WorkbenchTemplateId = "regional_manager" | "management" | "default";
 export type WorkbenchIntent = Exclude<AnalysisIntent, "irrelevant">;
 
 export interface WorkbenchTemplate {
