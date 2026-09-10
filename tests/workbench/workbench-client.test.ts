@@ -26,7 +26,7 @@ import {
 } from "../../src/modules/workbench/workbench-presentation";
 import {
   createWorkbenchContextRequestLifecycle,
-  resolveTemplateDefaultView,
+  resolveTemplateDefaultViewChange,
 } from "../../src/hooks/workbench-context-lifecycle";
 import type { WorkbenchContext } from "../../src/modules/workbench/workbench-types";
 import type { DataSummary } from "../../src/modules/domain/analysis-types";
@@ -170,15 +170,15 @@ test("presentation profiles adapt priority without widening permissions", () => 
 
 test("template defaults initialize once and reset only when the template changes", () => {
   assert.equal(
-    resolveTemplateDefaultView("analysis", null, "management"),
+    resolveTemplateDefaultViewChange(null, "management"),
     "overview"
   );
   assert.equal(
-    resolveTemplateDefaultView("analysis", "management", "management"),
-    "analysis"
+    resolveTemplateDefaultViewChange("management", "management"),
+    null
   );
   assert.equal(
-    resolveTemplateDefaultView("report", "regional_manager", "management"),
+    resolveTemplateDefaultViewChange("regional_manager", "management"),
     "overview"
   );
 });
@@ -628,6 +628,7 @@ test("formal insight exposes accessible controls initialized from the profile", 
 
   for (const label of ["核心判断", "关键发现", "支持证据", "行动清单"]) {
     assert.match(html, new RegExp(`aria-label="切换${label}"`));
+    assert.match(html, new RegExp(`<h3[^>]*><button[^>]*aria-label="切换${label}"`));
   }
   assert.match(html, /aria-label="切换核心判断"[^>]*aria-expanded="true"/);
   assert.match(html, /aria-label="切换行动清单"[^>]*aria-expanded="false"/);

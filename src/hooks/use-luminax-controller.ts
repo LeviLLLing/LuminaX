@@ -19,7 +19,7 @@ import {
   resolveInsightView,
   type InsightView,
 } from "@/modules/workbench/workbench-presentation";
-import { resolveTemplateDefaultView } from "@/hooks/workbench-context-lifecycle";
+import { resolveTemplateDefaultViewChange } from "@/hooks/workbench-context-lifecycle";
 import type {
   WorkbenchContext,
   WorkbenchTemplateId,
@@ -47,13 +47,11 @@ export function useLuminaXController(context: WorkbenchContext | null) {
 
   useEffect(() => {
     if (context === null) return;
-    setInsightView((currentView) =>
-      resolveTemplateDefaultView(
-        currentView,
-        initializedTemplateIdRef.current,
-        context.templateId
-      )
+    const defaultView = resolveTemplateDefaultViewChange(
+      initializedTemplateIdRef.current,
+      context.templateId
     );
+    if (defaultView !== null) setInsightView(defaultView);
     initializedTemplateIdRef.current = context.templateId;
   }, [context]);
 

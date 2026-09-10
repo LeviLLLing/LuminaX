@@ -24,12 +24,11 @@ export function createWorkbenchContextRequestLifecycle(): WorkbenchContextReques
   };
 }
 
-export function resolveTemplateDefaultView(
-  currentView: InsightView,
+export function resolveTemplateDefaultViewChange(
   previousTemplateId: WorkbenchTemplateId | null,
   nextTemplateId: WorkbenchTemplateId
-): InsightView {
+): InsightView | null {
   return previousTemplateId === nextTemplateId
-    ? currentView
+    ? null
     : getWorkbenchPresentationProfile(nextTemplateId).defaultView;
 }
