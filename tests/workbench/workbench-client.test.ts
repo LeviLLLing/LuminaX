@@ -14,14 +14,20 @@ import {
 } from "../../src/modules/workbench/workbench-context-client";
 import { authorizeIntentMetadata } from "../../src/modules/workbench/workbench-intent-policy";
 import {
+  createExpandedInsightSections,
   getMetricLabel,
   getOrderedInsightSections,
   getSuggestedQuestions,
   getVisibleInsightSections,
   getWorkbenchCopy,
   getWorkbenchPresentationProfile,
+  syncExpandedInsightSections,
+  toggleExpandedInsightSection,
 } from "../../src/modules/workbench/workbench-presentation";
-import { createWorkbenchContextRequestLifecycle } from "../../src/hooks/workbench-context-lifecycle";
+import {
+  createWorkbenchContextRequestLifecycle,
+  resolveTemplateDefaultView,
+} from "../../src/hooks/workbench-context-lifecycle";
 import type { WorkbenchContext } from "../../src/modules/workbench/workbench-types";
 import type { DataSummary } from "../../src/modules/domain/analysis-types";
 import {
@@ -49,6 +55,19 @@ test("client context normalizes templates without widening authorization", () =>
       canAccessAdmin: false,
     }
   );
+});
+
+test("client context accepts the documented management presentation template", () => {
+  const context = normalizeWorkbenchContext({
+    templateId: "management",
+    availableStoreIds: ["S001"],
+    availableMetricCodes: ["achievement_rate"],
+    availableIntents: ["achievement_rate"],
+    canAccessAdmin: true,
+  });
+
+  assert.equal(context.templateId, "management");
+  assert.deepEqual(context.availableStoreIds, ["S001"]);
 });
 
 test("client context rejects missing permission collections", () => {
@@ -121,9 +140,24 @@ test("presentation selectors expose only metric-backed sections", () => {
 test("presentation profiles adapt priority without widening permissions", () => {
   const regional = getWorkbenchPresentationProfile("regional_manager");
   const executive = getWorkbenchPresentationProfile("default");
+  const management = getWorkbenchPresentationProfile("management");
   assert.equal(regional.assistantMode, "action_first");
   assert.equal(executive.assistantMode, "summary_first");
   assert.equal(regional.defaultView, "overview");
+  assert.equal(management.defaultView, "overview");
+  assert.equal(management.assistantMode, "summary_first");
+  assert.deepEqual(management.defaultExpandedSections, [
+    "summary",
+    "findings",
+    "evidence",
+  ]);
+  assert.deepEqual(
+    getOrderedInsightSections(
+      ["compare"],
+      management
+    ).slice(0, 6),
+    ["totalSales", "achievement", "salesTrend", "refund", "orders", "aov"]
+  );
   assert.deepEqual(
     getOrderedInsightSections(["achievement_rate", "refund_rate"], executive),
     ["totalSales", "achievement", "refund", "salesTrend"]
@@ -131,6 +165,47 @@ test("presentation profiles adapt priority without widening permissions", () => 
   assert.doesNotMatch(
     JSON.stringify(getOrderedInsightSections(["achievement_rate"], regional)),
     /channel|refund/
+  );
+});
+
+test("template defaults initialize once and reset only when the template changes", () => {
+  assert.equal(
+    resolveTemplateDefaultView("analysis", null, "management"),
+    "overview"
+  );
+  assert.equal(
+    resolveTemplateDefaultView("analysis", "management", "management"),
+    "analysis"
+  );
+  assert.equal(
+    resolveTemplateDefaultView("report", "regional_manager", "management"),
+    "overview"
+  );
+});
+
+test("formal insight section toggles preserve local state until the template changes", () => {
+  const initial = createExpandedInsightSections(
+    "management",
+    getWorkbenchPresentationProfile("management").defaultExpandedSections
+  );
+  const collapsed = toggleExpandedInsightSection(initial, "evidence");
+
+  assert.equal(collapsed.expanded.has("evidence"), false);
+  assert.equal(
+    syncExpandedInsightSections(
+      collapsed,
+      "management",
+      getWorkbenchPresentationProfile("management").defaultExpandedSections
+    ),
+    collapsed
+  );
+  assert.deepEqual(
+    [...syncExpandedInsightSections(
+      collapsed,
+      "regional_manager",
+      getWorkbenchPresentationProfile("regional_manager").defaultExpandedSections
+    ).expanded],
+    ["summary", "findings", "actions"]
   );
 });
 
@@ -545,6 +620,21 @@ test("insight renders one formal article with stable reading sections", () => {
   assert.match(html, /aria-label="查看证据：晚间销售承压"/);
 });
 
+test("formal insight exposes accessible controls initialized from the profile", () => {
+  const html = renderInsightPanel({
+    templateId: "management",
+    defaultExpandedSections: ["summary", "findings", "evidence"],
+  });
+
+  for (const label of ["核心判断", "关键发现", "支持证据", "行动清单"]) {
+    assert.match(html, new RegExp(`aria-label="切换${label}"`));
+  }
+  assert.match(html, /aria-label="切换核心判断"[^>]*aria-expanded="true"/);
+  assert.match(html, /aria-label="切换行动清单"[^>]*aria-expanded="false"/);
+  assert.match(html, /data-insight-section="verification"/);
+  assert.doesNotMatch(html, /负责角色：运营/);
+});
+
 test("formal insight keeps the verification section when no checks are pending", () => {
   const html = renderInsightPanel({
     insight: { ...insightDto, verificationItems: [] },
@@ -683,6 +773,8 @@ function renderInsightPanel(
       error: null,
       generationStatus: "idle",
       pendingActionIds: [],
+      templateId: "management",
+      defaultExpandedSections: ["summary", "findings", "evidence", "actions"],
       activeScope: {
         storeIds: ["S001"],
         startDate: "2026-08-01",

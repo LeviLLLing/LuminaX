@@ -14,9 +14,9 @@
 ### Product presentation
 - `ProductBrandBar` and `ProductState` are presentation-only primitives shared by login, workbench, and administration surfaces.
 - `WorkbenchShell` owns the responsive data/assistant split and collapse state; `ScopeBar` owns only authorized scope controls; `AssistantPanel` always renders the complete ordered chat transcript while `DecisionBrief` provides a compact projection of the latest insight.
-- `InsightCanvas` routes between overview, formal insight, and weekly report reading surfaces. Formal insight owns findings, evidence navigation, verification items, and actions; `ReportView` passes trusted generated HTML unchanged to its sandboxed iframe.
+- `InsightCanvas` routes between overview, formal insight, and weekly report reading surfaces. Formal insight owns profile-initialized section expansion, findings, evidence navigation, always-separate verification items, and actions; `ReportView` passes trusted generated HTML unchanged to its sandboxed iframe.
 - `AdminShell` owns only module selection. Metric and permission modules retain their existing use cases, while reserved report modules expose honest disabled table states.
-- `WorkbenchPresentationProfile` only changes display priority; `regional_manager` is action-first and `default` is summary-first.
+- `WorkbenchPresentationProfile` only changes display priority; `regional_manager` is action-first, while `management` and `default` are summary-first. `management` is a presentation profile for the existing `super_admin` role, not an authorization role.
 - Role presentation cannot widen table, column, or store-value access. Server authorization remains authoritative for every data request.
 - UI code must use the semantic tokens in `src/app/globals.css` and the chart palette in `src/modules/visualization/chart-theme.ts`. Yellow is reserved for brand, primary commands, current selection, AI focus, and pending action; risk, positive, and data states use their named semantic colors.
 

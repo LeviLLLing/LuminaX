@@ -19,6 +19,14 @@ export interface WorkbenchPresentationProfile {
   )[];
 }
 
+export type FormalInsightSectionId =
+  WorkbenchPresentationProfile["defaultExpandedSections"][number];
+
+export interface ExpandedInsightSections {
+  templateId: WorkbenchTemplateId;
+  expanded: ReadonlySet<FormalInsightSectionId>;
+}
+
 export interface ActiveInsightScope {
   storeIds: string[];
   startDate: string;
@@ -79,6 +87,22 @@ const PRESENTATION_PROFILES: Record<
       "daypart",
     ],
     defaultExpandedSections: ["summary", "findings", "actions"],
+  },
+  management: {
+    defaultView: "overview",
+    assistantMode: "summary_first",
+    sectionOrder: [
+      "totalSales",
+      "achievement",
+      "salesTrend",
+      "refund",
+      "orders",
+      "aov",
+      "channel",
+      "category",
+      "daypart",
+    ],
+    defaultExpandedSections: ["summary", "findings", "evidence"],
   },
   default: {
     defaultView: "overview",
@@ -142,9 +166,40 @@ export function resolveInsightView(intent: AnalysisIntent): InsightView {
 }
 
 export function getWorkbenchCopy(templateId: WorkbenchTemplateId) {
-  return templateId === "regional_manager"
-    ? { label: "区域经理模板", title: "辖区经营概览" }
-    : { label: "通用模板", title: "经营决策工作台" };
+  if (templateId === "regional_manager") {
+    return { label: "区域经理模板", title: "辖区经营概览" };
+  }
+  if (templateId === "management") {
+    return { label: "管理层模板", title: "管理层经营总览" };
+  }
+  return { label: "通用模板", title: "经营决策工作台" };
+}
+
+export function createExpandedInsightSections(
+  templateId: WorkbenchTemplateId,
+  defaults: readonly FormalInsightSectionId[]
+): ExpandedInsightSections {
+  return { templateId, expanded: new Set(defaults) };
+}
+
+export function toggleExpandedInsightSection(
+  state: ExpandedInsightSections,
+  sectionId: FormalInsightSectionId
+): ExpandedInsightSections {
+  const expanded = new Set(state.expanded);
+  if (expanded.has(sectionId)) expanded.delete(sectionId);
+  else expanded.add(sectionId);
+  return { ...state, expanded };
+}
+
+export function syncExpandedInsightSections(
+  state: ExpandedInsightSections,
+  templateId: WorkbenchTemplateId,
+  defaults: readonly FormalInsightSectionId[]
+): ExpandedInsightSections {
+  return state.templateId === templateId
+    ? state
+    : createExpandedInsightSections(templateId, defaults);
 }
 
 const INTENT_PROMPTS: Record<WorkbenchIntent, string> = {

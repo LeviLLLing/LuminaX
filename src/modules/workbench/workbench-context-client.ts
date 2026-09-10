@@ -40,8 +40,9 @@ export function normalizeWorkbenchContext(payload: unknown): WorkbenchContext {
   }
   return {
     templateId:
-      result.data.templateId === "regional_manager"
-        ? "regional_manager"
+      result.data.templateId === "regional_manager" ||
+      result.data.templateId === "management"
+        ? result.data.templateId
         : "default",
     availableStoreIds: unique(result.data.availableStoreIds),
     availableMetricCodes: unique(result.data.availableMetricCodes),

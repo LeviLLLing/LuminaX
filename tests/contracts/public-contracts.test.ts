@@ -17,6 +17,7 @@ import { createPostWeeklyReportHandler } from "../../src/app/api/reports/weekly/
 import type { AuthenticatedUser } from "../../src/modules/auth/auth-types";
 import { createGetLatestInsightHandler } from "../../src/app/api/insights/latest/handler";
 import { createPatchInsightActionHandler } from "../../src/app/api/insights/latest/actions/[actionId]/handler";
+import { createGetWorkbenchContextHandler } from "../../src/app/api/workbench/context/handler";
 import { toInsightSnapshotDto, type InsightSnapshot } from "../../src/modules/insights/insight-types";
 
 test("public chat SSE wire format remains stable", async () => {
@@ -46,6 +47,33 @@ test("public chat SSE wire format remains stable", async () => {
       'data: {"type":"content","content":"分析完成"}\n\n' +
       "data: [DONE]\n\n"
   );
+});
+
+test("workbench context contract exposes management without permission internals", async () => {
+  const response = await createGetWorkbenchContextHandler({
+    authenticate: async () => ({
+      id: "admin",
+      username: "admin",
+      displayName: "Admin",
+      role: "super_admin",
+    }),
+    getContext: async () => ({
+      templateId: "management",
+      availableStoreIds: ["S001"],
+      availableMetricCodes: ["achievement_rate"],
+      availableIntents: ["achievement_rate"],
+      canAccessAdmin: true,
+    }),
+  })(new NextRequest("http://localhost/api/workbench/context"));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    templateId: "management",
+    availableStoreIds: ["S001"],
+    availableMetricCodes: ["achievement_rate"],
+    availableIntents: ["achievement_rate"],
+    canAccessAdmin: true,
+  });
 });
 
 test("chat HTTP adapter adds insight events without changing existing payloads", async (context) => {

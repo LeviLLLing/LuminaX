@@ -114,6 +114,8 @@ export function InsightCanvas({
           error={insightError}
           generationStatus={insightGenerationStatus}
           pendingActionIds={pendingInsightActionIds}
+          templateId={templateId}
+          defaultExpandedSections={presentationProfile.defaultExpandedSections}
           activeScope={activeInsightScope}
           suggestions={suggestions}
           onAskQuestion={onAskQuestion}

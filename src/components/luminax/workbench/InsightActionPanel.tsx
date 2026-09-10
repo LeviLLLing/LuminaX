@@ -5,7 +5,15 @@ import { AlertTriangle, ArrowRightLeft, Clock3, Database, Store } from "lucide-r
 import { InsightActionChecklist } from "@/components/luminax/workbench/InsightActionChecklist";
 import { InsightEvidenceSection } from "@/components/luminax/workbench/InsightEvidenceSection";
 import { InsightFindingList } from "@/components/luminax/workbench/InsightFindingList";
-import { isInsightScopeActive } from "@/modules/workbench/workbench-presentation";
+import { InsightSectionToggle } from "@/components/luminax/workbench/InsightSectionToggle";
+import {
+  createExpandedInsightSections,
+  isInsightScopeActive,
+  syncExpandedInsightSections,
+  toggleExpandedInsightSection,
+  type FormalInsightSectionId,
+} from "@/modules/workbench/workbench-presentation";
+import type { WorkbenchTemplateId } from "@/modules/workbench/workbench-types";
 import type { InsightFinding, InsightScope, InsightSnapshotDto } from "@/modules/insights/insight-types";
 
 interface ActiveInsightScope {
@@ -20,6 +28,8 @@ export interface InsightActionPanelProps {
   error: string | null;
   generationStatus: "idle" | "generating" | "failed";
   pendingActionIds: string[];
+  templateId: WorkbenchTemplateId;
+  defaultExpandedSections: readonly FormalInsightSectionId[];
   activeScope: ActiveInsightScope;
   suggestions: string[];
   onAskQuestion(question: string): void;
@@ -33,12 +43,17 @@ export function InsightActionPanel({
   error,
   generationStatus,
   pendingActionIds,
+  templateId,
+  defaultExpandedSections,
   activeScope,
   suggestions,
   onAskQuestion,
   onApplyScope,
   onToggleAction,
 }: InsightActionPanelProps) {
+  const [expandedSections, setExpandedSections] = useState(() =>
+    createExpandedInsightSections(templateId, defaultExpandedSections)
+  );
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [highlightedEvidenceIds, setHighlightedEvidenceIds] = useState<Set<string>>(new Set());
   const evidenceRefs = useRef(new Map<string, HTMLElement>());
@@ -46,6 +61,22 @@ export function InsightActionPanel({
 
   useEffect(() => () => {
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
+  }, []);
+
+  useEffect(() => {
+    setExpandedSections((current) =>
+      syncExpandedInsightSections(
+        current,
+        templateId,
+        defaultExpandedSections
+      )
+    );
+  }, [defaultExpandedSections, templateId]);
+
+  const toggleSection = useCallback((sectionId: FormalInsightSectionId) => {
+    setExpandedSections((current) =>
+      toggleExpandedInsightSection(current, sectionId)
+    );
   }, []);
 
   const registerEvidenceRef = useCallback((id: string, element: HTMLElement | null) => {
@@ -56,10 +87,17 @@ export function InsightActionPanel({
   const selectFinding = useCallback((finding: InsightFinding) => {
     setSelectedFindingId(finding.id);
     setHighlightedEvidenceIds(new Set(finding.evidenceIds));
-    evidenceRefs.current.get(finding.evidenceIds[0])?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-    });
+    setExpandedSections((current) =>
+      current.expanded.has("evidence")
+        ? current
+        : toggleExpandedInsightSection(current, "evidence")
+    );
+    setTimeout(() => {
+      evidenceRefs.current.get(finding.evidenceIds[0])?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }, 0);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightedEvidenceIds(new Set()), 1800);
   }, []);
@@ -130,21 +168,32 @@ export function InsightActionPanel({
         data-insight-section="core"
         className="border-b border-border bg-[color-mix(in_srgb,var(--luminax-yellow)_10%,white)] px-4 py-6 sm:px-6"
       >
-        <p className="text-xs font-medium text-[#716200]">核心判断</p>
-        <h3 className="mt-2 break-words text-lg font-semibold leading-7 text-[#17181a]">
-          {insight.headline}
-        </h3>
+        <InsightSectionToggle
+          label="核心判断"
+          expanded={expandedSections.expanded.has("summary")}
+          controls="insight-summary-content"
+          onToggle={() => toggleSection("summary")}
+        />
+        {expandedSections.expanded.has("summary") && (
+          <h3 id="insight-summary-content" className="mt-2 break-words text-lg font-semibold leading-7 text-foreground">
+            {insight.headline}
+          </h3>
+        )}
       </section>
 
       <InsightFindingList
         findings={insight.findings}
+        expanded={expandedSections.expanded.has("findings")}
         selectedFindingId={selectedFindingId}
         onSelectFinding={selectFinding}
+        onToggle={() => toggleSection("findings")}
       />
       <InsightEvidenceSection
         evidence={insight.evidence}
+        expanded={expandedSections.expanded.has("evidence")}
         highlightedEvidenceIds={highlightedEvidenceIds}
         registerEvidenceRef={registerEvidenceRef}
+        onToggle={() => toggleSection("evidence")}
       />
       <section
         data-insight-section="verification"
@@ -169,8 +218,10 @@ export function InsightActionPanel({
       </section>
       <InsightActionChecklist
         actions={insight.actions}
+        expanded={expandedSections.expanded.has("actions")}
         pendingActionIds={pendingActionIds}
         onToggleAction={onToggleAction}
+        onToggle={() => toggleSection("actions")}
       />
     </article>
   );

@@ -19,7 +19,11 @@ import {
   resolveInsightView,
   type InsightView,
 } from "@/modules/workbench/workbench-presentation";
-import type { WorkbenchContext } from "@/modules/workbench/workbench-types";
+import { resolveTemplateDefaultView } from "@/hooks/workbench-context-lifecycle";
+import type {
+  WorkbenchContext,
+  WorkbenchTemplateId,
+} from "@/modules/workbench/workbench-types";
 import type { InsightScope } from "@/modules/insights/insight-types";
 
 interface GeneratedReport {
@@ -30,6 +34,7 @@ interface GeneratedReport {
 export function useLuminaXController(context: WorkbenchContext | null) {
   const { salesData, loading, error, reload } = useSalesData(context !== null);
   const [insightView, setInsightView] = useState<InsightView>("overview");
+  const initializedTemplateIdRef = useRef<WorkbenchTemplateId | null>(null);
   const [generatedReport, setGeneratedReport] =
     useState<GeneratedReport | null>(null);
   const reportRequestRef = useRef<ReturnType<
@@ -39,6 +44,18 @@ export function useLuminaXController(context: WorkbenchContext | null) {
   const [startDate, setStartDate] = useState(DEFAULT_START_DATE);
   const [endDate, setEndDate] = useState(DEFAULT_END_DATE);
   const [compareStores, setCompareStores] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (context === null) return;
+    setInsightView((currentView) =>
+      resolveTemplateDefaultView(
+        currentView,
+        initializedTemplateIdRef.current,
+        context.templateId
+      )
+    );
+    initializedTemplateIdRef.current = context.templateId;
+  }, [context]);
 
   const authorizedStores = useMemo(() => {
     if (!salesData || context === null) return [];
